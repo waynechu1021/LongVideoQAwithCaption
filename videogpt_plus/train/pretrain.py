@@ -649,7 +649,8 @@ class LazySupervisedDataset(Dataset):
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         sources = self.list_data_dict[i]
         if 'image' in sources:
-            image_folder = sources['data_path']
+            #image_folder = sources['data_path']
+            image_folder = self.data_args.image_folder
             image_file = sources['image']
 
             image = Image.open(os.path.join(image_folder, image_file.replace("\\", "/"))).convert('RGB')
