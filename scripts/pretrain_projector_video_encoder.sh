@@ -8,7 +8,7 @@ VISION_TOWER=OpenGVLab/InternVideo2-Stage2_1B-224p-f4
 PROJECTOR_TYPE=mlp2x_gelu
 OUTPUT_DIR_PATH=results/mlp2x_gelu_internvideo2
 
-deepspeed videogpt_plus/train/pretrain.py \
+CUDA_VISIBLE_DEVICES=6 deepspeed videogpt_plus/train/pretrain.py \
 --deepspeed scripts/zero2.json \
 --tune_mm_mlp_adapter True \
 --model_name_or_path "$BASE_LLM_PATH" \

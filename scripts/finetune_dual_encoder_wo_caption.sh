@@ -3,15 +3,15 @@
 export PYTHONPATH=`pwd`:$PYTHONPATH
 export DATASET_DIR=playground/data
 
-BASE_LLM_PATH=.cache/Phi-3-mini-4k-instruct
+BASE_LLM_PATH=.cache/Phi-3-mini-4k-instruct-previous-version
 VISION_TOWER=.cache/InternVideo2-Stage2_1B-224p-f4
 IMAGE_VISION_TOWER=.cache/clip-vit-large-patch14-336
 PROJECTOR_TYPE=mlp2x_gelu
 PRETRAIN_VIDEO_MLP_PATH=.cache/VideoGPT-plus_Phi3-mini-4k_Pretrain/mlp2x_gelu_internvideo2/mm_projector.bin
 PRETRAIN_IMAGE_MLP_PATH=.cache/VideoGPT-plus_Phi3-mini-4k_Pretrain/mlp2x_gelu_clip_l14_336px/mm_projector.bin
-OUTPUT_DIR_PATH=results/videogpt_plus_finetune_wo_caption
+OUTPUT_DIR_PATH=results/videogpt_plus_finetune_wo_caption-test
 
-CUDA_VISIBLE_DEVICES=0 deepspeed videogpt_plus/train/train.py \
+CUDA_VISIBLE_DEVICES=6 deepspeed --master_port 25400 videogpt_plus/train/train.py \
 --lora_enable True --lora_r 128 --lora_alpha 256 --mm_projector_lr 2e-5 \
 --deepspeed scripts/zero3.json \
 --model_name_or_path "$BASE_LLM_PATH" \
@@ -34,9 +34,9 @@ CUDA_VISIBLE_DEVICES=0 deepspeed videogpt_plus/train/train.py \
 --bf16 True \
 --output_dir $OUTPUT_DIR_PATH \
 --num_train_epochs 1 \
---per_device_train_batch_size 8 \
+--per_device_train_batch_size 4 \
 --per_device_eval_batch_size 4 \
---gradient_accumulation_steps 2 \
+--gradient_accumulation_steps 4 \
 --evaluation_strategy "no" \
 --save_strategy "steps" \
 --save_steps 50000 \

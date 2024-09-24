@@ -8,7 +8,7 @@ IMAGE_VISION_TOWER=openai/clip-vit-large-patch14-336
 PROJECTOR_TYPE=mlp2x_gelu
 OUTPUT_DIR_PATH=results/mlp2x_gelu_clip_l14_336px
 
-deepspeed videogpt_plus/train/pretrain.py \
+CUDA_VISIBLE_DEVICES=6 deepspeed videogpt_plus/train/pretrain.py \
 --deepspeed scripts/zero2.json \
 --tune_image_mm_mlp_adapter True \
 --model_name_or_path "$BASE_LLM_PATH" \

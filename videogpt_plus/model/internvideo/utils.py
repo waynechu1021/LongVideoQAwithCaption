@@ -272,3 +272,11 @@ class InternVideo2_Stage2V(nn.Module):
     @property
     def num_patches(self):
         return self.config.model.vision_encoder.patch_size
+    
+    @property
+    def device(self):
+        return self.vision_encoder.patch_embed.proj.weight.device
+    
+    @property
+    def dummy_feature(self):
+        return torch.zeros(1, self.hidden_size, device=self.device, dtype=self.dtype)

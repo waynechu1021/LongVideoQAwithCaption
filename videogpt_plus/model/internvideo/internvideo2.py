@@ -728,6 +728,7 @@ def pretrain_internvideo2_1b_patch14_224(config):
         interpolate_pos_embed_internvideo2(state_dict, model, orig_t_size=8)
         message = model.load_state_dict(state_dict, strict=False)
         logger.info(message)
+        print(message)
     else:
         logger.info("No pretrained weights!!!")
     return model

@@ -34,6 +34,7 @@ from PIL import Image
 import random
 import numpy as np
 from videogpt_plus.model.dataloader import _get_rawvideo_dec
+from transformers.trainer import TrainerCallback
 
 local_rank = None
 
@@ -114,6 +115,13 @@ class TrainingArguments(transformers.TrainingArguments):
 
     seed = 42
 
+class LogCallback(TrainerCallback):
+    def __init__(self, logging):
+        self.logging = logging
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if state.is_local_process_zero:
+            self.logging.info(logs)
 
 def maybe_zero_3(param, ignore_status=False, name=None):
     from deepspeed import zero
@@ -806,6 +814,19 @@ def train():
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    if training_args.local_rank == 0 or training_args.local_rank == -1:
+        file_formatter = logging.Formatter(fmt="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+                                       datefmt="%m/%d/%Y %H:%M:%S", )
+        os.makedirs(training_args.output_dir, exist_ok=True)
+        file_handler = logging.FileHandler(
+            os.path.join(training_args.output_dir, f"train.log"))
+        file_handler.setFormatter(file_formatter)
+        logging.root.addHandler(file_handler)
+        logging.root.setLevel(logging.INFO)
+
+        logging.info("Training/evaluation parameters %s", training_args)
+        logging.info("Model parameters %s", model_args)
+        logging.info("Data parameters %s", data_args)
     local_rank = training_args.local_rank
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
 
@@ -940,7 +961,8 @@ def train():
             p.requires_grad = False
         for p in model.get_model().image_mm_projector.parameters():
             p.requires_grad = False
-
+    print('projector grad enable = ',all(p.requires_grad for p in model.get_model().image_mm_projector.parameters()))
+    print('mm_projector grad enable = ',all(p.requires_grad for p in model.get_model().mm_projector.parameters()))
     if training_args.bits in [4, 8]:
         model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
         model.get_model().image_mm_projector.to(dtype=compute_dtype, device=training_args.device)
@@ -987,7 +1009,12 @@ def train():
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
     print(f"Total training samples :{len(data_module['train_dataset'])}")
 
-    trainer = VideoGPTPlusTrainer(model=model, tokenizer=tokenizer, args=training_args, **data_module)
+    log_callback = LogCallback(logging)
+    trainer = VideoGPTPlusTrainer(model=model, 
+                                tokenizer=tokenizer,
+                                args=training_args,
+                                callbacks=[log_callback],
+                                **data_module)
 
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         trainer.train(resume_from_checkpoint=True)

@@ -95,7 +95,7 @@ compile_model = False
 
 # ========================= optimizer ==========================
 dist_url = "env://"
-device = "cuda"
+device = "cuda:6"
 mode = "pt"
 
 # ========================= others ==========================
