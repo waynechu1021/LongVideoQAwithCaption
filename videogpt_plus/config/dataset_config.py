@@ -1,6 +1,7 @@
 import os
 
-DATASET_DIR = os.environ.get("DATASET_DIR", "playground/data")
+# DATASET_DIR = os.environ.get("DATASET_DIR", "playground/data")
+DATASET_DIR = os.environ.get("DATASET_DIR", "hdd2/zwy/videoGPT+pretrain")
 
 CC3M_595K = {
     "annotation_path": f"{DATASET_DIR}/pretraining/CC3M-595K/chat.json",
