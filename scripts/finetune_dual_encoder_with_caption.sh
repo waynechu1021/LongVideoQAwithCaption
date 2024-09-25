@@ -17,7 +17,7 @@ CUDA_VISIBLE_DEVICES=4 deepspeed videogpt_plus/train/train.py \
 --model_name_or_path "$BASE_LLM_PATH" \
 --version phi3_instruct \
 --dataset_use FINETUNING \
---data_path playground/Moment-10M_0_selected_6k.json \
+--data_path playground/Moment-10M_0_train.json \
 --image_folder playground/data \
 --use_caption True \
 --vision_tower "$VISION_TOWER" \

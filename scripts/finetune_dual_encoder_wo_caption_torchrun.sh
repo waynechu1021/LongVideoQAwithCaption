@@ -16,7 +16,7 @@ CUDA_VISIBLE_DEVICES=6 torchrun --nproc-per-node 1 --master_port=20058 videogpt_
 --model_name_or_path "$BASE_LLM_PATH" \
 --version phi3_instruct \
 --dataset_use FINETUNING \
---data_path playground/Moment-10M_0_selected_6k.json \
+--data_path playground/Moment-10M_0_train.json \
 --image_folder playground/data \
 --use_caption False \
 --vision_tower "$VISION_TOWER" \
