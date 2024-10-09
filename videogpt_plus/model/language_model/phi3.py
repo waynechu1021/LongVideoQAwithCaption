@@ -58,8 +58,8 @@ class VideoGPTPlusPhi3ForCausalLM(Phi3ForCausalLM, VideoGPTPlusMetaForCausalLM):
 
         if getattr(self.get_model(),'mamba',None) is not None:
             if getattr(self.config,'stage',None) == 1:
-                input_ids, attention_mask, attention_mask_llm, past_key_values, inputs_embeds, inputs_embeds_llm, labels = self.prepare_inputs_labels_for_mamba_stage1(
-                    input_ids, input_ids_llm, attention_mask, attention_mask_llm, past_key_values, labels, images, context_images)
+                input_ids, attention_mask, attention_mask_llm, past_key_values, inputs_embeds, inputs_embeds_llm, labels = self.prepare_inputs_labels_for_meteor(
+                    input_ids, input_ids_llm, attention_mask, attention_mask_llm, past_key_values, labels, images, context_images, self.config.stage)
                 '''examine the input_embed'''
                 # for i in range(inputs_embeds.shape[0]):
                 #     tor_token_index = torch.where(input_ids_llm[i]==self.config.tor_token_index)

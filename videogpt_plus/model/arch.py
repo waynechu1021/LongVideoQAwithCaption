@@ -96,6 +96,7 @@ class MetaModel:
         pretrain_tor_adapter = model_args.pretrain_tor_adapter
         pretrain_tor_embedding = model_args.pretrain_tor_embedding
         mamba_hidden_size = self.mamba.config.hidden_size 
+        self.max_num_of_tor = getattr(model_args,'max_num_of_tor',None)
         self.tor_embedding = torch.nn.Parameter(torch.randn(100, mamba_hidden_size))
         self.tor_projector = torch.nn.Sequential(
             torch.nn.Linear(mamba_hidden_size,self.config.hidden_size),
@@ -505,7 +506,7 @@ class VideoGPTPlusMetaForCausalLM(ABC):
 
         return None, attention_mask, past_key_values, new_input_embeds, new_labels
 
-    def prepare_inputs_labels_for_mamba_stage1(self, input_ids, input_ids_llm, attention_mask, attention_mask_llm, past_key_values, labels, images,
+    def prepare_inputs_labels_for_meteor(self, input_ids, input_ids_llm, attention_mask, attention_mask_llm, past_key_values, labels, images,
                                              context_images, stage = 1):
         vision_tower = self.get_vision_tower()
         image_vision_tower = self.get_image_vision_tower()
@@ -524,11 +525,12 @@ class VideoGPTPlusMetaForCausalLM(ABC):
             image_features = self.encode_images(images)
         
         new_input_embeds = []
-        # llm input_embeds should not have the visual features and instructions
+        # llm input_embeds should not have the visual features and instructions for stage1
         new_input_embeds_llm = []
         new_labels = [] if labels is not None else None
         cur_image_idx = 0
         for batch_idx, cur_input_ids in enumerate(input_ids):
+            cur_input_ids_llm = input_ids_llm[batch_idx]
             if (cur_input_ids == IMAGE_TOKEN_INDEX).sum() == 0:
                 # Multimodal LLM, but the current sample is not multimodal
                 cur_input_embeds = self.get_model().mamba.backbone.embeddings(cur_input_ids)
@@ -536,7 +538,7 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                         0. * self.get_model().mamba.vision_projector(vision_tower.dummy_feature)).sum()
                 new_input_embeds.append(cur_input_embeds)
 
-                cur_input_embeds_llm = self.get_model().embed_tokens(input_ids_llm[batch_idx])
+                cur_input_embeds_llm = self.get_model().embed_tokens(cur_input_ids_llm)
                 cur_input_embeds_llm = cur_input_embeds_llm + (
                         0. * self.get_model().mm_vision_projector(vision_tower.dummy_feature)).sum()
                 new_input_embeds_llm.append(cur_input_embeds_llm)
@@ -554,7 +556,9 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                 continue
 
             image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
-
+            if stage == 2:
+                image_token_indices_llm = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
+                assert len(image_token_indices) == len(image_token_indices_llm)
             global_tor_token_indices = torch.where(cur_input_ids == TOR_TOKEN_INDEX_MAMBA)[0]
 
             cur_new_input_embeds = []
@@ -562,7 +566,8 @@ class VideoGPTPlusMetaForCausalLM(ABC):
             if labels is not None:
                 cur_labels = labels[batch_idx]
                 cur_new_labels = []
-                # assert cur_labels.shape == cur_input_ids.shape
+                if stage == 2:
+                    assert cur_labels.shape == cur_input_ids_llm.shape
 
             if len(image_token_indices) > 1:  # This is a video
                 temp = []
@@ -577,7 +582,10 @@ class VideoGPTPlusMetaForCausalLM(ABC):
 
                 for i in temp:
                     image_token_start = image_token_indices[0]
-                    image_token_end = image_token_indices[-1]
+                    image_token_end = image_token_indices[-1] # maybe this method is not right for a sample with more than one image which have multiple discontinuous positions.
+                    if stage == 2:
+                        image_token_start_llm = image_token_indices_llm[0]
+                        image_token_end_llm = image_token_indices_llm[-1]
                     cur_image_features = []
 
                     for _ in range(len(i) // CHUNK_SIZE):
@@ -586,6 +594,11 @@ class VideoGPTPlusMetaForCausalLM(ABC):
 
                     if len(i) > 2:
                         cur_image_features = torch.stack(cur_image_features, dim=0)
+                        if stage == 2:
+                            cur_image_features_llm = self.project(cur_image_features, context_features[batch_idx],
+                                                          input_type="image",is_mamba=False)
+                            t, l, n = cur_image_features_llm.size()
+                            cur_image_features_llm = cur_image_features_llm.contiguous().view(t * l, n)
                         cur_image_features = self.project(cur_image_features, context_features[batch_idx],
                                                           input_type="video",is_mamba=True)
                         t, l, n = cur_image_features.size()
@@ -594,6 +607,11 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                         # This is video but only 1 frame is sampled
                         # This will not happen as video encoder needs at least 4 frames
                         cur_image_features = torch.stack(cur_image_features, dim=0)
+                        if stage == 2:
+                            cur_image_features_llm = self.project(cur_image_features, context_features[batch_idx],
+                                                          input_type="image",is_mamba=False)
+                            t, l, n = cur_image_features_llm.size()
+                            cur_image_features_llm = cur_image_features_llm.contiguous().view(t * l, n)
                         cur_image_features = self.project(cur_image_features, context_features[batch_idx],
                                                           input_type="image",is_mamba=True)
                         t, l, n = cur_image_features.size()
@@ -609,38 +627,61 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                             self.get_model().mamba.backbone.embeddings(cur_input_ids[image_token_start - 1:image_token_start])
                         )
                         cur_new_input_embeds.append(cur_image_features)
+                        if stage == 2:
+                            cur_new_input_embeds.append(self.get_model().tor_embedding[:self.max_num_of_tor])
+                            cur_new_input_embeds_llm.append(
+                            self.get_model().embed_tokens(cur_input_ids_llm[:image_token_start_llm - 1]).detach()
+                            )
+                            cur_new_input_embeds_llm.append(
+                                self.get_model().embed_tokens(cur_input_ids_llm[image_token_start_llm - 1:image_token_start_llm])
+                            )
+                            cur_new_input_embeds_llm.append(cur_image_features_llm)
+                            cur_new_input_embeds_llm.append(self.get_model().tor_embedding[:self.max_num_of_tor])
+                            cur_new_input_embeds_llm.append(
+                                self.get_model().embed_tokens(cur_input_ids_llm[image_token_end_llm + 1:image_token_end_llm + 2])
+                            )
+                            if labels is not None:
+                                cur_new_labels.append(cur_labels[:image_token_start_llm])
+                                cur_new_labels.append(
+                                    torch.full(
+                                        (cur_image_features_llm.shape[0] + self.max_num_of_tor,), IGNORE_INDEX, device=labels.device,
+                                        dtype=labels.dtype
+                                    )
+                                )
+                                cur_new_labels.append(cur_labels[image_token_end_llm:image_token_end_llm + 1])
+                                cur_labels = cur_labels[image_token_end_llm + 2:]
                         cur_new_input_embeds.append(
                             self.get_model().mamba.backbone.embeddings(cur_input_ids[image_token_end + 1:image_token_end + 2])
                         )
-                        # if labels is not None:
-                        #     cur_new_labels.append(cur_labels[:image_token_start])
-                        #     cur_new_labels.append(
-                        #         torch.full(
-                        #             (cur_image_features.shape[0],), IGNORE_INDEX, device=labels.device,
-                        #             dtype=labels.dtype
-                        #         )
-                        #     )
-                        #     cur_new_labels.append(cur_labels[image_token_end:image_token_end + 1])
-                        #     cur_labels = cur_labels[image_token_end + 2:]
+
                     else:
                         cur_new_input_embeds.append(self.get_model().mamba.backbone.embeddings(cur_input_ids[:image_token_start]))
                         cur_new_input_embeds.append(cur_image_features)
-                        # if labels is not None:
-                        #     cur_new_labels.append(cur_labels[:image_token_start])
-                        #     cur_new_labels.append(
-                        #         torch.full(
-                        #             (cur_image_features.shape[0],), IGNORE_INDEX, device=labels.device,
-                        #             dtype=labels.dtype
-                        #         )
-                        #     )
-                        #     cur_labels = cur_labels[image_token_end + 1:]
+                        if stage == 2:
+                            cur_new_input_embeds.append(self.get_model().tor_embedding[:self.max_num_of_tor])
+                            cur_new_input_embeds_llm.append(self.get_model().embed_tokens(cur_input_ids_llm[:image_token_start_llm]))
+                            cur_new_input_embeds_llm.append(cur_image_features_llm)
+                            cur_new_input_embeds_llm.append(self.get_model().tor_embedding[:self.max_num_of_tor])
+                            if labels is not None:
+                                cur_new_labels.append(cur_labels[:image_token_start_llm])
+                                cur_new_labels.append(
+                                    torch.full(
+                                        (cur_image_features_llm.shape[0] + self.max_num_of_tor,), IGNORE_INDEX, device=labels.device,
+                                        dtype=labels.dtype
+                                    )
+                                )
+                                cur_labels = cur_labels[image_token_end_llm + 1:]
 
                 if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(
                         self.config, 'mm_use_im_start_end', False
                 ):
                     cur_input_ids = cur_input_ids[image_token_end + 2:]
+                    if stage == 2:
+                        cur_input_ids_llm = cur_input_ids_llm[image_token_end_llm + 2:]
                 else:
                     cur_input_ids = cur_input_ids[image_token_end + 1:]
+                    if stage == 2:
+                        cur_input_ids_llm = cur_input_ids_llm[image_token_end_llm + 1:]
 
             elif image_token_indices.numel() > 0:  # This is an image
                 cur_image_features = []
@@ -652,6 +693,10 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                     cur_image_idx += 1
 
                 cur_image_features = torch.stack(cur_image_features, dim=0)
+                if stage == 2:
+                    cur_image_features_llm = self.project(video_features=None, context_features=cur_image_features, input_type="image",is_mamba=False)
+                    t, l, n = cur_image_features_llm.size()
+                    cur_image_features_llm = cur_image_features_llm.contiguous().view(t * l, n)
                 cur_image_features = self.project(video_features=None, context_features=cur_image_features, input_type="image",is_mamba=True)
                 t, l, n = cur_image_features.size()
                 cur_image_features = cur_image_features.contiguous().view(t * l, n)
@@ -663,55 +708,79 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                         self.get_model().mamba.backbone.embeddings(cur_input_ids[:image_token_start - 1]).detach()
                     )
                     cur_new_input_embeds.append(
-                        self.get_model().embed_tmamba.backbone.embeddingsokens(cur_input_ids[image_token_start - 1:image_token_start])
+                        self.get_model().mamba.backbone.embeddings(cur_input_ids[image_token_start - 1:image_token_start])
                     )
                     cur_new_input_embeds.append(cur_image_features)
+                    if stage == 2:
+                        cur_new_input_embeds.append(self.get_model().tor_embedding[:self.max_num_of_tor])
+                        cur_new_input_embeds_llm.append(
+                        self.get_model().embed_tokens(cur_input_ids_llm[:image_token_start_llm - 1]).detach()
+                        )
+                        cur_new_input_embeds_llm.append(
+                            self.get_model().embed_tokens(cur_input_ids_llm[image_token_start_llm - 1:image_token_start_llm])
+                        )
+                        cur_new_input_embeds_llm.append(cur_image_features_llm)
+                        cur_new_input_embeds_llm.append(self.get_model().tor_embedding[:self.max_num_of_tor])
+                        cur_new_input_embeds_llm.append(
+                            self.get_model().embed_tokens(cur_input_ids_llm[image_token_end_llm + 1:image_token_end_llm + 2])
+                        )
+                        if labels is not None:
+                            cur_new_labels.append(cur_labels[:image_token_start_llm])
+                            cur_new_labels.append(
+                                torch.full(
+                                    (cur_image_features_llm.shape[0] + self.max_num_of_tor,), IGNORE_INDEX, device=labels.device, dtype=labels.dtype
+                                )
+                            )
+                            cur_new_labels.append(cur_labels[image_token_end_llm:image_token_end_llm + 1])
+                            cur_labels = cur_labels[image_token_end_llm + 2:]
                     cur_new_input_embeds.append(
                         self.get_model().mamba.backbone.embeddings(cur_input_ids[image_token_end + 1:image_token_end + 2])
                     )
-                    # if labels is not None:
-                    #     cur_new_labels.append(cur_labels[:image_token_start])
-                    #     cur_new_labels.append(
-                    #         torch.full(
-                    #             (cur_image_features.shape[0],), IGNORE_INDEX, device=labels.device, dtype=labels.dtype
-                    #         )
-                    #     )
-                    #     cur_new_labels.append(cur_labels[image_token_end:image_token_end + 1])
-                    #     cur_labels = cur_labels[image_token_end + 2:]
                 else:
                     cur_new_input_embeds.append(self.get_model().mamba.backbone.embeddings(cur_input_ids[:image_token_start]))
                     cur_new_input_embeds.append(cur_image_features)
-                    # if labels is not None:
-                    #     cur_new_labels.append(cur_labels[:image_token_start])
-                    #     cur_new_labels.append(
-                    #         torch.full(
-                    #             (cur_image_features.shape[0],), IGNORE_INDEX, device=labels.device, dtype=labels.dtype
-                    #         )
-                    #     )
-                    #     cur_labels = cur_labels[image_token_end + 1:]
+                    if stage == 2:
+                        cur_new_input_embeds.append(self.get_model().tor_embedding[:self.max_num_of_tor])
+                        cur_new_input_embeds_llm.append(self.get_model().embed_tokens(cur_input_ids_llm[:image_token_start_llm]))
+                        cur_new_input_embeds_llm.append(cur_image_features_llm)
+                        cur_new_input_embeds_llm.append(self.get_model().tor_embedding[:self.max_num_of_tor])
+                        if labels is not None:
+                            cur_new_labels.append(cur_labels[:image_token_start_llm])
+                            cur_new_labels.append(
+                                torch.full(
+                                    (cur_image_features_llm.shape[0] + self.max_num_of_tor,), IGNORE_INDEX, device=labels.device, dtype=labels.dtype
+                                )
+                            )
+                            cur_labels = cur_labels[image_token_end_llm + 1:]
 
                 if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(
                         self.config, 'mm_use_im_start_end', False
                 ):
                     cur_input_ids = cur_input_ids[image_token_end + 2:]
+                    if stage == 2:
+                        cur_input_ids_llm = cur_input_ids_llm[image_token_end_llm + 2:]
                 else:
                     cur_input_ids = cur_input_ids[image_token_end + 1:]
+                    if stage == 2:
+                        cur_input_ids_llm = cur_input_ids_llm[image_token_end_llm + 1:]
 
             if cur_input_ids.numel() > 0:
                 if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(
                         self.config, 'mm_use_im_start_end', False
                 ):
                     cur_new_input_embeds.append(self.get_model().mamba.backbone.embeddings(cur_input_ids).detach())
+                    cur_new_input_embeds_llm.append(self.get_model().embed_tokens(cur_input_ids_llm).detach())
                 else:
                     cur_new_input_embeds.append(self.get_model().mamba.backbone.embeddings(cur_input_ids))
-                #as tor token only occur after the image token like `prompt + question + caption(with tor)`
-                if len(global_tor_token_indices) != 0:
-                    tor_token_indices = torch.where(cur_input_ids == TOR_TOKEN_INDEX_MAMBA)[0]
-                    assert len(global_tor_token_indices) == len(tor_token_indices) and torch.all(global_tor_token_indices - tor_token_indices == global_tor_token_indices[0]-tor_token_indices[0])
-                    cur_new_input_embeds[-1][tor_token_indices] = self.get_model().tor_embedding[:len(tor_token_indices)]
+                    cur_new_input_embeds_llm.append(self.get_model().embed_tokens(cur_input_ids_llm))
+                #for stage 1 as tor token only occur after the image token like `prompt + question + caption(with tor)`
+                if stage == 1:
+                    if len(global_tor_token_indices) != 0:
+                        tor_token_indices = torch.where(cur_input_ids == TOR_TOKEN_INDEX_MAMBA)[0]
+                        assert len(global_tor_token_indices) == len(tor_token_indices) and torch.all(global_tor_token_indices - tor_token_indices == global_tor_token_indices[0]-tor_token_indices[0])
+                        cur_new_input_embeds[-1][tor_token_indices] = self.get_model().tor_embedding[:len(tor_token_indices)]
                 if labels is not None:
                     cur_new_labels.append(cur_labels)
-                    cur_new_input_embeds_llm.append(self.get_model().embed_tokens(input_ids_llm[batch_idx])) 
                     if len(global_tor_token_indices) != 0:
                         tor_token_indices_label = torch.where(cur_labels == TOR_TOKEN_INDEX)[0]
                         cur_new_labels[-1][tor_token_indices_label] = IGNORE_INDEX
@@ -784,6 +853,25 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                     new_attention_mask.append(cur_new_attention_mask)
                 attention_mask = torch.stack(new_attention_mask, dim=0)
                 assert attention_mask.shape == new_labels.shape
+            if attention_mask_llm is not None:
+                new_attention_mask_llm = []
+                for cur_attention_mask_llm, cur_new_labels, cur_new_labels_align in zip(
+                        attention_mask_llm, _new_labels, new_labels
+                ):
+                    new_attn_mask_pad_left = torch.full(
+                        (cur_new_labels.shape[0] - labels.shape[1],), True, dtype=attention_mask_llm.dtype,
+                        device=attention_mask_llm.device
+                    )
+                    new_attn_mask_pad_right = torch.full(
+                        (cur_new_labels_align.shape[0] - cur_new_labels.shape[0],), False, dtype=attention_mask_llm.dtype,
+                        device=attention_mask_llm.device
+                    )
+                    cur_new_attention_mask_llm = torch.cat(
+                        (new_attn_mask_pad_left, cur_attention_mask_llm, new_attn_mask_pad_right), dim=0
+                    )
+                    new_attention_mask_llm.append(cur_new_attention_mask_llm)
+                attention_mask_llm = torch.stack(new_attention_mask_llm, dim=0)
+                assert attention_mask_llm.shape == new_labels.shape
         else:
             new_input_embeds = torch.stack(new_input_embeds, dim=0)
             new_input_embeds_llm = torch.stack(new_input_embeds_llm, dim=0)
