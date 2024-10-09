@@ -3,7 +3,7 @@
 export PYTHONPATH=`pwd`:$PYTHONPATH
 export DATASET_DIR=playground/data
 
-BASE_LLM_PATH=.cache/Phi-3-mini-4k-instruct-previous-version
+BASE_LLM_PATH=.cache/Phi-3-mini-128k-instruct
 VISION_TOWER=.cache/InternVideo2-Stage2_1B-224p-f4
 IMAGE_VISION_TOWER=.cache/clip-vit-large-patch14-336
 PROJECTOR_TYPE=mlp2x_gelu
@@ -30,7 +30,7 @@ CUDA_VISIBLE_DEVICES=6 deepspeed --master_port 25400 videogpt_plus/train/train.p
 --mm_use_im_start_end False \
 --mm_use_im_patch_token False \
 --image_aspect_ratio pad \
---group_by_modality_length True \
+--group_by_modality_length False \
 --bf16 True \
 --output_dir $OUTPUT_DIR_PATH \
 --num_train_epochs 1 \

@@ -142,6 +142,18 @@ conv_llama3 = Conversation(
     sep="<|eot_id|>",
 )
 
+conv_mamba = Conversation(
+    system="A chat between a curious user and an artificial intelligence assistant. "
+    "The assistant gives helpful, detailed, and polite answers to the user's questions.",
+    roles=("USER", "ASSISTANT"),
+    version="mamba",
+    messages=(),
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="<|endoftext|>",
+)
+
 default_conversation = conv_phi3_instruct
 conv_templates = {
     "default": conv_phi3_instruct,

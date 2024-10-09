@@ -20,3 +20,8 @@ DEFAULT_VID_START_TOKEN = "<vid_start>"
 DEFAULT_VID_END_TOKEN = "<vid_end>"
 DEFAULT_BOX_START_TOKEN = "<box_start>"
 DEFAULT_BOX_END_TOKEN = "<box_end>"
+
+#change TOR_TOKEN_INDEX to the index of tor in tokenizer
+DEFAULT_TOR_TOKRN = "<tor>"
+TOR_TOKEN_INDEX = 32011
+TOR_TOKEN_INDEX_MAMBA = 50277

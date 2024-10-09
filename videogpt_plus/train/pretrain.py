@@ -34,6 +34,7 @@ from PIL import Image
 import random
 import numpy as np
 from videogpt_plus.model.dataloader import _get_rawvideo_dec
+from transformers.trainer import TrainerCallback
 
 local_rank = None
 
@@ -111,6 +112,14 @@ class TrainingArguments(transformers.TrainingArguments):
 
     seed = 42
 
+
+class LogCallback(TrainerCallback):
+    def __init__(self, logging):
+        self.logging = logging
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if state.is_local_process_zero:
+            self.logging.info(logs)
 
 def maybe_zero_3(param, ignore_status=False, name=None):
     from deepspeed import zero
@@ -221,6 +230,9 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer,
             else:
                 torch.save(weight_to_save, os.path.join(output_dir, f'mm_projector.bin'))
 
+    if getattr(trainer.args, "tune_mm_mlp_adapter", False) or getattr(trainer.args, "tune_image_mm_mlp_adapter", False):
+        return 
+    
     if trainer.deepspeed:
         torch.cuda.synchronize()
         trainer.save_model(output_dir)
@@ -649,8 +661,8 @@ class LazySupervisedDataset(Dataset):
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         sources = self.list_data_dict[i]
         if 'image' in sources:
-            #image_folder = sources['data_path']
-            image_folder = self.data_args.image_folder
+            image_folder = sources['data_path']
+            # image_folder = self.data_args.image_folder
             image_file = sources['image']
 
             image = Image.open(os.path.join(image_folder, image_file.replace("\\", "/"))).convert('RGB')
@@ -770,6 +782,19 @@ def train():
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    if training_args.local_rank == 0 or training_args.local_rank == -1:
+        file_formatter = logging.Formatter(fmt="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+                                       datefmt="%m/%d/%Y %H:%M:%S", )
+        os.makedirs(training_args.output_dir, exist_ok=True)
+        file_handler = logging.FileHandler(
+            os.path.join(training_args.output_dir, f"train.log"))
+        file_handler.setFormatter(file_formatter)
+        logging.root.addHandler(file_handler)
+        logging.root.setLevel(logging.INFO)
+
+        logging.info("Training/evaluation parameters %s", training_args)
+        logging.info("Model parameters %s", model_args)
+        logging.info("Data parameters %s", data_args)
     local_rank = training_args.local_rank
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
 
@@ -952,8 +977,8 @@ def train():
                         module = module.to(torch.bfloat16)
 
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
-
-    trainer = VideoGPTPlusTrainer(model=model, tokenizer=tokenizer, args=training_args, **data_module)
+    log_callback = LogCallback(logging)
+    trainer = VideoGPTPlusTrainer(model=model, tokenizer=tokenizer, args=training_args, **data_module, callbacks=[log_callback],)
 
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         trainer.train(resume_from_checkpoint=True)

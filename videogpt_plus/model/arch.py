@@ -6,6 +6,7 @@ from .multimodal_projector.builder import build_vision_projector
 from einops import rearrange
 import math
 import torch.nn.functional as F
+from .language_model.mamba import MeteorMambaForCausalLM
 
 
 class MetaModel:
@@ -17,6 +18,11 @@ class MetaModel:
             self.image_vision_tower = build_vision_tower(config, delay_load=True, image_vision_tower=True)
             self.mm_projector = build_vision_projector(config, image_mm_projector=False)
             self.image_mm_projector = build_vision_projector(config, image_mm_projector=True)
+        if hasattr(config,'mm_mamba'):
+            self.mamba = MeteorMambaForCausalLM.from_pretrained(config.mm_mamba)
+            self.mamba.resize_token_embeddings(32064)
+            self.mamba.build_vision_projector(self.get_vision_tower().hidden_size, self.mamba.config.hidden_size)
+            self.mamba.build_image_vision_projector(self.get_image_vision_tower().hidden_size, self.mamba.config.hidden_size)
 
     def get_vision_tower(self):
         vision_tower = getattr(self, 'vision_tower', None)
@@ -86,6 +92,59 @@ class MetaModel:
             self.image_mm_projector.load_state_dict(get_w(mm_projector_weights, 'mm_projector'))
             print('load image_mm_projector',msg)
 
+    def initialize_tor_modules(self,model_args):
+        pretrain_tor_adapter = model_args.pretrain_tor_adapter
+        pretrain_tor_embedding = model_args.pretrain_tor_embedding
+        mamba_hidden_size = self.mamba.config.hidden_size 
+        self.tor_embedding = torch.nn.Parameter(torch.randn(100, mamba_hidden_size))
+        self.tor_projector = torch.nn.Sequential(
+            torch.nn.Linear(mamba_hidden_size,self.config.hidden_size),
+            torch.nn.GELU(),
+            torch.nn.Linear(self.config.hidden_size,self.config.hidden_size),
+        )
+        if pretrain_tor_adapter is not None:
+            print(f"Initializing tor projector from {pretrain_tor_adapter}")
+            tor_projector_weights = torch.load(pretrain_tor_adapter, map_location='cpu')
+
+            def get_w(weights, keyword):
+                return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
+
+            msg = self.tor_projector.load_state_dict(get_w(tor_projector_weights, 'tor_projector'))
+            print('load tor_projector',msg)
+    
+        if pretrain_tor_embedding is not None:
+            print(f"Initializing tor embedding from {pretrain_tor_adapter}")
+            tor_embedding_weights = torch.load(pretrain_tor_embedding, map_location='cpu')
+
+            def get_w(weights, keyword):
+                return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
+
+            msg = self.tor_embedding.load_state_dict(get_w(tor_embedding_weights, 'tor_embedding'))
+            print('load tor_embedding',msg)
+
+    def initialize_mamba_and_tor_modules(self,model_args):
+        if model_args.mamba_name_or_path is not None:
+            self.config.mm_mamba = model_args.mamba_name_or_path
+            self.mamba = MeteorMambaForCausalLM.from_pretrained(model_args.mamba_name_or_path)
+            # replacing embedding size of mamba with that of meteor
+            # FIXME the number of vocab size should be changed according to the llm
+            # self.mamba.backbone.embeddings = torch.nn.Embedding(num_embeddings=32064,
+            #                                         embedding_dim=self.mamba.config.hidden_size)
+            # self.mamba.resize_token_embeddings(32064)
+            self.mamba.build_vision_projector(self.get_vision_tower().hidden_size, self.mamba.config.hidden_size)
+            self.mamba.build_image_vision_projector(self.get_image_vision_tower().hidden_size, self.mamba.config.hidden_size)
+            self.initialize_tor_modules(model_args)
+            pretrain_mamba_module = model_args.pretrain_mamba_module
+            if pretrain_mamba_module is not None:
+                print(f"Initializing tor projector from {pretrain_mamba_module}")
+                mamba_module_weights = torch.load(pretrain_mamba_module, map_location='cpu')
+
+                def get_w(weights, keyword):
+                    return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
+
+                msg = self.mamba.load_state_dict(get_w(mamba_module_weights, 'mamba'))
+                print('load mamba_module',msg)
+
 
 def apply_adaptive_avg_pooling(x, shape=(12, 12)):
     b, num_tokens, c = x.shape
@@ -153,14 +212,20 @@ class VideoGPTPlusMetaForCausalLM(ABC):
         x = x + p[:, :x.shape[1], :].to(x.device).to(x.dtype)
         return x
 
-    def project(self, video_features, context_features=None, input_type="image"):
+    def project(self, video_features, context_features=None, input_type="image", is_mamba = False):
         if input_type == "video":
-            video_features = self.get_model().mm_projector(video_features)
+            if is_mamba:
+                video_features = self.get_model().mamba.vision_projector(video_features.to(torch.bfloat16))
+            else:
+                video_features = self.get_model().mm_projector(video_features.to(torch.bfloat16))
             video_features = rearrange(video_features, 'b (t l) d -> (b t) l d', t=4)  # t=4 - chunk size
             video_features = apply_adaptive_avg_pooling(video_features, shape=(8, 8))  # Feature pooling from 256 to 64
             video_features = rearrange(video_features, '(b t) l d -> b (t l) d', t=4)  # t=4 - chunk size
 
-            context_image_features = self.get_model().image_mm_projector(context_features)
+            if is_mamba:
+                context_image_features = self.get_model().mamba.image_vision_projector(context_features)
+            else:
+                context_image_features = self.get_model().image_mm_projector(context_features)
             context_image_features = apply_adaptive_avg_pooling(context_image_features,
                                                                 shape=(12, 12))  # Feature pooling from 576 to 144
             context_image_features = rearrange(context_image_features, '(b t) l d -> b (t l) d',
@@ -440,11 +505,315 @@ class VideoGPTPlusMetaForCausalLM(ABC):
 
         return None, attention_mask, past_key_values, new_input_embeds, new_labels
 
+    def prepare_inputs_labels_for_mamba_stage1(self, input_ids, input_ids_llm, attention_mask, attention_mask_llm, past_key_values, labels, images,
+                                             context_images, stage = 1):
+        vision_tower = self.get_vision_tower()
+        image_vision_tower = self.get_image_vision_tower()
+        if (vision_tower is None and image_vision_tower is None) or images is None or input_ids.shape[1] == 1:
+            if past_key_values is not None and vision_tower is not None and images is not None and input_ids.shape[
+                1] == 1:
+                attention_mask = torch.ones(
+                    (attention_mask.shape[0], past_key_values[-1][-1].shape[-2] + 1), dtype=attention_mask.dtype,
+                    device=attention_mask.device
+                )
+            return input_ids, attention_mask, past_key_values, None, labels
+
+        if images is not None and context_images is not None:
+            video_features, context_features = self.encode_videos(images, context_images, batch_size=input_ids.shape[0])
+        elif images is not None:
+            image_features = self.encode_images(images)
+        
+        new_input_embeds = []
+        # llm input_embeds should not have the visual features and instructions
+        new_input_embeds_llm = []
+        new_labels = [] if labels is not None else None
+        cur_image_idx = 0
+        for batch_idx, cur_input_ids in enumerate(input_ids):
+            if (cur_input_ids == IMAGE_TOKEN_INDEX).sum() == 0:
+                # Multimodal LLM, but the current sample is not multimodal
+                cur_input_embeds = self.get_model().mamba.backbone.embeddings(cur_input_ids)
+                cur_input_embeds = cur_input_embeds + (
+                        0. * self.get_model().mamba.vision_projector(vision_tower.dummy_feature)).sum()
+                new_input_embeds.append(cur_input_embeds)
+
+                cur_input_embeds_llm = self.get_model().embed_tokens(input_ids_llm[batch_idx])
+                cur_input_embeds_llm = cur_input_embeds_llm + (
+                        0. * self.get_model().mm_vision_projector(vision_tower.dummy_feature)).sum()
+                new_input_embeds_llm.append(cur_input_embeds_llm)
+                if labels is not None:
+                    new_labels.append(labels[batch_idx])
+                cur_image_idx += 1
+
+                if (cur_input_ids == TOR_TOKEN_INDEX_MAMBA).sum() != 0:
+                    tor_token_indices = torch.where(cur_input_ids == TOR_TOKEN_INDEX_MAMBA)[0]
+                    new_input_embeds[-1][tor_token_indices] = self.get_model().tor_embedding[:len(tor_token_indices)]
+                    if labels is not None:
+                        tor_token_indices_label = torch.where(labels[batch_idx] == TOR_TOKEN_INDEX)[0]
+                        new_labels[-1][tor_token_indices_label] = IGNORE_INDEX
+                        new_input_embeds_llm[-1][tor_token_indices_label] = self.get_model().tor_embedding[:len(tor_token_indices_label)]
+                continue
+
+            image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
+
+            global_tor_token_indices = torch.where(cur_input_ids == TOR_TOKEN_INDEX_MAMBA)[0]
+
+            cur_new_input_embeds = []
+            cur_new_input_embeds_llm = []
+            if labels is not None:
+                cur_labels = labels[batch_idx]
+                cur_new_labels = []
+                # assert cur_labels.shape == cur_input_ids.shape
+
+            if len(image_token_indices) > 1:  # This is a video
+                temp = []
+                cur, pre = image_token_indices[0], image_token_indices[0]
+                for i in image_token_indices:
+                    cur = i
+                    if cur - pre == 1:
+                        temp[-1] = temp[-1] + [cur]
+                    else:
+                        temp.append([cur])
+                    pre = cur
+
+                for i in temp:
+                    image_token_start = image_token_indices[0]
+                    image_token_end = image_token_indices[-1]
+                    cur_image_features = []
+
+                    for _ in range(len(i) // CHUNK_SIZE):
+                        cur_image_features.append(video_features[cur_image_idx])
+                        cur_image_idx += 1
+
+                    if len(i) > 2:
+                        cur_image_features = torch.stack(cur_image_features, dim=0)
+                        cur_image_features = self.project(cur_image_features, context_features[batch_idx],
+                                                          input_type="video",is_mamba=True)
+                        t, l, n = cur_image_features.size()
+                        cur_image_features = cur_image_features.contiguous().view(t * l, n)
+                    else:
+                        # This is video but only 1 frame is sampled
+                        # This will not happen as video encoder needs at least 4 frames
+                        cur_image_features = torch.stack(cur_image_features, dim=0)
+                        cur_image_features = self.project(cur_image_features, context_features[batch_idx],
+                                                          input_type="image",is_mamba=True)
+                        t, l, n = cur_image_features.size()
+                        cur_image_features = cur_image_features.contiguous().view(t * l, n)
+
+                    if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(
+                            self.config, 'mm_use_im_start_end', False
+                    ):
+                        cur_new_input_embeds.append(
+                            self.get_model().mamba.backbone.embeddings(cur_input_ids[:image_token_start - 1]).detach()
+                        )
+                        cur_new_input_embeds.append(
+                            self.get_model().mamba.backbone.embeddings(cur_input_ids[image_token_start - 1:image_token_start])
+                        )
+                        cur_new_input_embeds.append(cur_image_features)
+                        cur_new_input_embeds.append(
+                            self.get_model().mamba.backbone.embeddings(cur_input_ids[image_token_end + 1:image_token_end + 2])
+                        )
+                        # if labels is not None:
+                        #     cur_new_labels.append(cur_labels[:image_token_start])
+                        #     cur_new_labels.append(
+                        #         torch.full(
+                        #             (cur_image_features.shape[0],), IGNORE_INDEX, device=labels.device,
+                        #             dtype=labels.dtype
+                        #         )
+                        #     )
+                        #     cur_new_labels.append(cur_labels[image_token_end:image_token_end + 1])
+                        #     cur_labels = cur_labels[image_token_end + 2:]
+                    else:
+                        cur_new_input_embeds.append(self.get_model().mamba.backbone.embeddings(cur_input_ids[:image_token_start]))
+                        cur_new_input_embeds.append(cur_image_features)
+                        # if labels is not None:
+                        #     cur_new_labels.append(cur_labels[:image_token_start])
+                        #     cur_new_labels.append(
+                        #         torch.full(
+                        #             (cur_image_features.shape[0],), IGNORE_INDEX, device=labels.device,
+                        #             dtype=labels.dtype
+                        #         )
+                        #     )
+                        #     cur_labels = cur_labels[image_token_end + 1:]
+
+                if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(
+                        self.config, 'mm_use_im_start_end', False
+                ):
+                    cur_input_ids = cur_input_ids[image_token_end + 2:]
+                else:
+                    cur_input_ids = cur_input_ids[image_token_end + 1:]
+
+            elif image_token_indices.numel() > 0:  # This is an image
+                cur_image_features = []
+                image_token_start = image_token_indices[0]
+                image_token_end = image_token_indices[-1]
+
+                for _ in image_token_indices:
+                    cur_image_features.append(image_features[cur_image_idx])
+                    cur_image_idx += 1
+
+                cur_image_features = torch.stack(cur_image_features, dim=0)
+                cur_image_features = self.project(video_features=None, context_features=cur_image_features, input_type="image",is_mamba=True)
+                t, l, n = cur_image_features.size()
+                cur_image_features = cur_image_features.contiguous().view(t * l, n)
+
+                if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(
+                        self.config, 'mm_use_im_start_end', False
+                ):
+                    cur_new_input_embeds.append(
+                        self.get_model().mamba.backbone.embeddings(cur_input_ids[:image_token_start - 1]).detach()
+                    )
+                    cur_new_input_embeds.append(
+                        self.get_model().embed_tmamba.backbone.embeddingsokens(cur_input_ids[image_token_start - 1:image_token_start])
+                    )
+                    cur_new_input_embeds.append(cur_image_features)
+                    cur_new_input_embeds.append(
+                        self.get_model().mamba.backbone.embeddings(cur_input_ids[image_token_end + 1:image_token_end + 2])
+                    )
+                    # if labels is not None:
+                    #     cur_new_labels.append(cur_labels[:image_token_start])
+                    #     cur_new_labels.append(
+                    #         torch.full(
+                    #             (cur_image_features.shape[0],), IGNORE_INDEX, device=labels.device, dtype=labels.dtype
+                    #         )
+                    #     )
+                    #     cur_new_labels.append(cur_labels[image_token_end:image_token_end + 1])
+                    #     cur_labels = cur_labels[image_token_end + 2:]
+                else:
+                    cur_new_input_embeds.append(self.get_model().mamba.backbone.embeddings(cur_input_ids[:image_token_start]))
+                    cur_new_input_embeds.append(cur_image_features)
+                    # if labels is not None:
+                    #     cur_new_labels.append(cur_labels[:image_token_start])
+                    #     cur_new_labels.append(
+                    #         torch.full(
+                    #             (cur_image_features.shape[0],), IGNORE_INDEX, device=labels.device, dtype=labels.dtype
+                    #         )
+                    #     )
+                    #     cur_labels = cur_labels[image_token_end + 1:]
+
+                if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(
+                        self.config, 'mm_use_im_start_end', False
+                ):
+                    cur_input_ids = cur_input_ids[image_token_end + 2:]
+                else:
+                    cur_input_ids = cur_input_ids[image_token_end + 1:]
+
+            if cur_input_ids.numel() > 0:
+                if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(
+                        self.config, 'mm_use_im_start_end', False
+                ):
+                    cur_new_input_embeds.append(self.get_model().mamba.backbone.embeddings(cur_input_ids).detach())
+                else:
+                    cur_new_input_embeds.append(self.get_model().mamba.backbone.embeddings(cur_input_ids))
+                #as tor token only occur after the image token like `prompt + question + caption(with tor)`
+                if len(global_tor_token_indices) != 0:
+                    tor_token_indices = torch.where(cur_input_ids == TOR_TOKEN_INDEX_MAMBA)[0]
+                    assert len(global_tor_token_indices) == len(tor_token_indices) and torch.all(global_tor_token_indices - tor_token_indices == global_tor_token_indices[0]-tor_token_indices[0])
+                    cur_new_input_embeds[-1][tor_token_indices] = self.get_model().tor_embedding[:len(tor_token_indices)]
+                if labels is not None:
+                    cur_new_labels.append(cur_labels)
+                    cur_new_input_embeds_llm.append(self.get_model().embed_tokens(input_ids_llm[batch_idx])) 
+                    if len(global_tor_token_indices) != 0:
+                        tor_token_indices_label = torch.where(cur_labels == TOR_TOKEN_INDEX)[0]
+                        cur_new_labels[-1][tor_token_indices_label] = IGNORE_INDEX
+            cur_new_input_embeds = [x.to(device=self.device) for x in cur_new_input_embeds]
+            cur_new_input_embeds = torch.cat(cur_new_input_embeds, dim=0)
+            cur_new_input_embeds_llm = [x.to(device=self.device) for x in cur_new_input_embeds_llm]
+            cur_new_input_embeds_llm = torch.cat(cur_new_input_embeds_llm, dim = 0)
+            new_input_embeds.append(cur_new_input_embeds)
+            new_input_embeds_llm.append(cur_new_input_embeds_llm)
+            if labels is not None:
+                cur_new_labels = torch.cat(cur_new_labels, dim=0)
+                new_labels.append(cur_new_labels)
+
+        if any(x.shape != new_input_embeds[0].shape for x in new_input_embeds):
+            max_len = max(x.shape[0] for x in new_input_embeds)
+
+            new_input_embeds_align = []
+            for cur_new_embed in new_input_embeds:
+                cur_new_embed = torch.cat(
+                    (cur_new_embed, torch.zeros(
+                        (max_len - cur_new_embed.shape[0], cur_new_embed.shape[1]), dtype=cur_new_embed.dtype,
+                        device=cur_new_embed.device
+                    )), dim=0
+                )
+                new_input_embeds_align.append(cur_new_embed)
+            new_input_embeds = torch.stack(new_input_embeds_align, dim=0)
+
+            max_len = max(x.shape[0] for x in new_input_embeds_llm)
+
+            new_input_embeds_align_llm = []
+            for cur_new_embed_llm in new_input_embeds_llm:
+                cur_new_embed_llm = torch.cat(
+                    (cur_new_embed_llm, torch.zeros(
+                        (max_len - cur_new_embed_llm.shape[0], cur_new_embed_llm.shape[1]), dtype=cur_new_embed_llm.dtype,
+                        device=cur_new_embed_llm.device
+                    )), dim=0
+                )
+                new_input_embeds_align_llm.append(cur_new_embed_llm)
+            new_input_embeds_llm = torch.stack(new_input_embeds_align_llm, dim=0)
+
+            if labels is not None:
+                new_labels_align = []
+                _new_labels = new_labels
+                for cur_new_label in new_labels:
+                    cur_new_label = torch.cat(
+                        (cur_new_label, torch.full(
+                            (max_len - cur_new_label.shape[0],), IGNORE_INDEX, dtype=cur_new_label.dtype,
+                            device=cur_new_label.device
+                        )), dim=0
+                    )
+                    new_labels_align.append(cur_new_label)
+                new_labels = torch.stack(new_labels_align, dim=0)
+
+            if attention_mask is not None:
+                new_attention_mask = []
+                for cur_attention_mask, cur_new_labels, cur_new_labels_align in zip(
+                        attention_mask, _new_labels, new_labels
+                ):
+                    new_attn_mask_pad_left = torch.full(
+                        (cur_new_labels.shape[0] - labels.shape[1],), True, dtype=attention_mask.dtype,
+                        device=attention_mask.device
+                    )
+                    new_attn_mask_pad_right = torch.full(
+                        (cur_new_labels_align.shape[0] - cur_new_labels.shape[0],), False, dtype=attention_mask.dtype,
+                        device=attention_mask.device
+                    )
+                    cur_new_attention_mask = torch.cat(
+                        (new_attn_mask_pad_left, cur_attention_mask, new_attn_mask_pad_right), dim=0
+                    )
+                    new_attention_mask.append(cur_new_attention_mask)
+                attention_mask = torch.stack(new_attention_mask, dim=0)
+                assert attention_mask.shape == new_labels.shape
+        else:
+            new_input_embeds = torch.stack(new_input_embeds, dim=0)
+            new_input_embeds_llm = torch.stack(new_input_embeds_llm, dim=0)
+            if labels is not None:
+                new_labels = torch.stack(new_labels, dim=0)
+
+            if attention_mask is not None:
+                new_attn_mask_pad_left = torch.full(
+                    (attention_mask.shape[0], new_input_embeds.shape[1] - input_ids.shape[1]), True,
+                    dtype=attention_mask.dtype, device=attention_mask.device
+                )
+                attention_mask = torch.cat((new_attn_mask_pad_left, attention_mask), dim=1)
+                assert attention_mask.shape == new_input_embeds.shape[:2]
+            if attention_mask_llm is not None:
+                new_attn_mask_pad_left = torch.full(
+                    (attention_mask_llm.shape[0], new_input_embeds_llm.shape[1] - input_ids_llm.shape[1]), True,
+                    dtype=attention_mask_llm.dtype, device=attention_mask_llm.device
+                )
+                attention_mask_llm = torch.cat((new_attn_mask_pad_left, attention_mask_llm), dim=1)
+                assert attention_mask_llm.shape == new_input_embeds_llm.shape[:2]
+
+        return input_ids, attention_mask, attention_mask_llm, past_key_values, new_input_embeds, new_input_embeds_llm, new_labels
+
     def initialize_vision_tokenizer(self, model_args, tokenizer):
         if model_args.mm_use_im_patch_token:
             tokenizer.add_tokens([DEFAULT_IMAGE_PATCH_TOKEN], special_tokens=True)
             tokenizer.add_tokens([DEFAULT_VIDEO_PATCH_TOKEN], special_tokens=True)
             self.resize_token_embeddings(len(tokenizer))
+        if getattr(model_args,'use_caption',False):
+            tokenizer.add_tokens([DEFAULT_TOR_TOKRN],special_tokens=True)
 
         if model_args.mm_use_im_start_end:
             num_new_tokens = tokenizer.add_tokens(
@@ -492,3 +861,28 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                     p.requires_grad = False
                 for p in self.get_output_embeddings().parameters():
                     p.requires_grad = False
+
+    def merge_input_embeds_with_tor_features(self, hidden_states, input_ids, input_ids_llm, inputs_embeds_llm):
+        for idx,cur_hidden_states in enumerate(hidden_states):
+            tor_token_index = torch.where(input_ids[idx]==self.config.tor_token_index_mamba)
+            cur_tor_embeddings = cur_hidden_states[tor_token_index]
+            cur_tor_embeddings = self.get_model().tor_projector(cur_tor_embeddings)
+            tor_token_index_llm = torch.where(input_ids_llm[idx]==self.config.tor_token_index)
+            inputs_embeds_llm[idx][tor_token_index_llm] = cur_tor_embeddings
+        return inputs_embeds_llm
+    
+    def remove_tor_features(self,hidden_states,input_ids_llm,labels):
+        new_hidden_states = []
+        for idx,cur_hidden_state in enumerate(hidden_states):
+            cur_label = labels[idx]
+            # tor_token_index_llm = torch.where(input_ids_llm[idx]==self.config.tor_token_index)
+            new_hidden_state = cur_hidden_state[input_ids_llm[idx]!=self.config.tor_token_index]
+            if cur_label.shape[0] >= new_hidden_state.shape[0]:
+                new_hidden_state = torch.cat([new_hidden_state,torch.zeros((cur_label.shape[0]-new_hidden_state.shape[0],new_hidden_state.shape[1]),dtype=new_hidden_state.dtype,device=new_hidden_state.device)])
+            else:
+                # new_hidden_state[cur_label.shape[0]:] is certainly the padded token
+                new_hidden_state = new_hidden_state[:cur_label.shape[0]]
+            new_hidden_states.append(new_hidden_state)
+        new_hidden_states = torch.stack(new_hidden_states)
+        return new_hidden_states
+        

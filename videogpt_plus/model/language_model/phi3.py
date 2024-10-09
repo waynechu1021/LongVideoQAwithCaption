@@ -5,10 +5,13 @@ from torch.nn import CrossEntropyLoss
 from transformers import AutoConfig, AutoModelForCausalLM, Phi3Model, Phi3Config, Phi3ForCausalLM
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from videogpt_plus.model.arch import MetaModel, VideoGPTPlusMetaForCausalLM
+from videogpt_plus.constants import *
 
 
 class VideoGPTPlusConfig(Phi3Config):
     model_type = "VideoGPT+"
+    tor_token_index = TOR_TOKEN_INDEX
+    tor_token_index_mamba = TOR_TOKEN_INDEX_MAMBA
 
 
 class VideoGPTPlusPhi3Model(MetaModel, Phi3Model):
@@ -34,7 +37,9 @@ class VideoGPTPlusPhi3ForCausalLM(Phi3ForCausalLM, VideoGPTPlusMetaForCausalLM):
     def forward(
             self,
             input_ids: torch.LongTensor = None,
+            input_ids_llm: torch.LongTensor = None,
             attention_mask: Optional[torch.Tensor] = None,
+            attention_mask_llm: Optional[torch.Tensor] = None,
             past_key_values: Optional[List[torch.FloatTensor]] = None,
             inputs_embeds: Optional[torch.FloatTensor] = None,
             labels: Optional[torch.LongTensor] = None,
@@ -51,22 +56,64 @@ class VideoGPTPlusPhi3ForCausalLM(Phi3ForCausalLM, VideoGPTPlusMetaForCausalLM):
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        input_ids, attention_mask, past_key_values, inputs_embeds, labels = self.prepare_inputs_labels_for_multimodal(
-            input_ids, attention_mask, past_key_values, labels, images, context_images)
+        if getattr(self.get_model(),'mamba',None) is not None:
+            if getattr(self.config,'stage',None) == 1:
+                input_ids, attention_mask, attention_mask_llm, past_key_values, inputs_embeds, inputs_embeds_llm, labels = self.prepare_inputs_labels_for_mamba_stage1(
+                    input_ids, input_ids_llm, attention_mask, attention_mask_llm, past_key_values, labels, images, context_images)
+                '''examine the input_embed'''
+                # for i in range(inputs_embeds.shape[0]):
+                #     tor_token_index = torch.where(input_ids_llm[i]==self.config.tor_token_index)
+                #     input_ids_llm_tor = input_ids_llm[i][tor_token_index]
+                #     inputs_embeds_llm_tor = inputs_embeds_llm[i][tor_token_index]
+                #     tor_token_index = torch.where(input_ids[i]==self.config.tor_token_index_mamba)
+                #     input_ids_tor = input_ids[i][tor_token_index]
+                #     inputs_embeds_tor = inputs_embeds[i][inputs_embeds.shape[1] - input_ids.shape[1]:][tor_token_index]
+                #     tor_embed = self.get_model().tor_embedding[:inputs_embeds_tor.shape[0]]
+                #     iftrue = torch.all(inputs_embeds_tor == tor_embed)
+                #     print(iftrue)
+                mamba_outputs = self.get_model().mamba(
+                    inputs_embeds = inputs_embeds,
+                    return_dict = return_dict,
+                )
+                last_hidden_states = mamba_outputs.last_hidden_state.to(inputs_embeds_llm.dtype)
+                last_hidden_states = last_hidden_states[:,inputs_embeds.shape[1] - input_ids.shape[1]:]
+                # the number of event is not always the same in a batch
+                inputs_embeds_llm = self.merge_input_embeds_with_tor_features(last_hidden_states,input_ids,input_ids_llm,inputs_embeds_llm)
+                outputs = self.model(
+                    input_ids=None,
+                    attention_mask=attention_mask_llm,
+                    past_key_values=past_key_values,
+                    inputs_embeds=inputs_embeds_llm,
+                    use_cache=use_cache,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict
+                )
+                #FIXME there is a BUG of device assertion error when using debugpy mode
+                hidden_states = outputs[0]
+                hidden_states = self.remove_tor_features(hidden_states,input_ids_llm,labels)
+                logits = self.lm_head(hidden_states)
+            elif getattr(self.config,'stage',None) == 2:
+                pass
+            else:
+                raise NotImplementedError
+        else:
+            #just for normal training without meteor mamba
+            input_ids, attention_mask, past_key_values, inputs_embeds, labels = self.prepare_inputs_labels_for_multimodal(
+                input_ids, attention_mask, past_key_values, labels, images, context_images)
 
-        outputs = self.model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict
-        )
-
-        hidden_states = outputs[0]
-        logits = self.lm_head(hidden_states)
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict
+            )
+            hidden_states = outputs[0]
+            logits = self.lm_head(hidden_states)
 
         loss = None
         if labels is not None:

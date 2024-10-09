@@ -3,7 +3,7 @@
 
 export DATASET_DIR=playground/data
 
-BASE_LLM_PATH=.cache/Phi-3-mini-4k-instruct-previous-version
+BASE_LLM_PATH=.cache/Phi-3-mini-128k-instruct
 IMAGE_VISION_TOWER=.cache/clip-vit-large-patch14-336
 PROJECTOR_TYPE=mlp2x_gelu
 OUTPUT_DIR_PATH=results/phi3_mini_4k_128k_pretrain/mlp2x_gelu_clip_l14_336px
