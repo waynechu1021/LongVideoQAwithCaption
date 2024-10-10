@@ -7,6 +7,7 @@ from einops import rearrange
 import math
 import torch.nn.functional as F
 from .language_model.mamba import MeteorMambaForCausalLM
+import logging
 
 
 class MetaModel:
@@ -73,17 +74,17 @@ class MetaModel:
             self.image_vision_tower = image_vision_tower
 
         if pretrain_mm_mlp_adapter is not None:
-            print(f"Initializing projector from {pretrain_mm_mlp_adapter}")
+            logging.info(f"Initializing projector from {pretrain_mm_mlp_adapter}")
             mm_projector_weights = torch.load(pretrain_mm_mlp_adapter, map_location='cpu')
 
             def get_w(weights, keyword):
                 return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
 
             msg = self.mm_projector.load_state_dict(get_w(mm_projector_weights, 'mm_projector'))
-            print('load mm_projector',msg)
+            logging.info(f'load mm_projector {msg}')
 
         if pretrain_image_mm_mlp_adapter is not None:
-            print(f"Initializing projector from {pretrain_image_mm_mlp_adapter}")
+            logging.info(f"Initializing projector from {pretrain_image_mm_mlp_adapter}")
             mm_projector_weights = torch.load(pretrain_image_mm_mlp_adapter, map_location='cpu')
 
             def get_w(weights, keyword):
@@ -91,6 +92,7 @@ class MetaModel:
 
             self.image_mm_projector.load_state_dict(get_w(mm_projector_weights, 'mm_projector'))
             print('load image_mm_projector',msg)
+            logging.info(f'load image_mm_projector {msg}')
 
     def initialize_tor_modules(self,model_args):
         pretrained_tor_and_projector_module = model_args.pretrained_tor_and_projector_module
@@ -102,7 +104,7 @@ class MetaModel:
             torch.nn.Linear(self.config.hidden_size,self.config.hidden_size),
         )
         if pretrained_tor_and_projector_module is not None:
-            print(f"Initializing tor projector from {pretrained_tor_and_projector_module}")
+            logging.info(f"Initializing tor projector from {pretrained_tor_and_projector_module}")
             tor_and_projector_module_weights = torch.load(pretrained_tor_and_projector_module, map_location='cpu')
 
             def get_w(weights, keyword, ignore_keyword=None):
@@ -112,23 +114,23 @@ class MetaModel:
                     return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k and ignore_keyword not in k}
 
             msg = self.tor_projector.load_state_dict(get_w(tor_and_projector_module_weights, 'tor_projector'))
-            print('load tor_projector',msg)
+            logging.info(f'load tor_projector {msg}')
 
-            print(f"Initializing image_vision_projector from {pretrained_tor_and_projector_module}")
+            logging.info(f"Initializing image_vision_projector from {pretrained_tor_and_projector_module}")
             self.image_vision_projector.load_state_dict(get_w(tor_and_projector_module_weights, 'image_vision_projector'))
-            print('load image_mm_projector',msg)
+            logging.info(f'load image_vision_projector {msg}')
             
-            print(f"Initializing vision_projector from {pretrained_tor_and_projector_module}")
+            logging.info(f"Initializing vision_projector from {pretrained_tor_and_projector_module}")
             self.vision_projector.load_state_dict(get_w(tor_and_projector_module_weights, 'vision_projector','image_vision_projector'))
-            print('load vision_projector',msg)
+            logging.info(f'load vision_projector {msg}')
     
-            print(f"Initializing tor embedding from {pretrained_tor_and_projector_module}")
+            logging.info(f"Initializing tor embedding from {pretrained_tor_and_projector_module}")
 
             def get_w(weights, keyword):
                 return {k.split(keyword)[1]+keyword: v for k, v in weights.items() if keyword in k}
 
             self.tor_embedding = torch.nn.Parameter(get_w(tor_and_projector_module_weights, 'tor_embedding')['tor_embedding'])
-            print('load tor_embedding successfully')
+            logging.info('load tor_embedding successfully')
         else:
             self.tor_embedding = torch.nn.Parameter(torch.randn(100, mamba_hidden_size))
 
@@ -140,7 +142,7 @@ class MetaModel:
             del self.mamba.lm_head
             # self.mamba.resize_token_embeddings(32064)
             if pretrain_mamba_module is not None:
-                print(f"Initializing mamba module from {pretrain_mamba_module}")
+                logging.info(f"Initializing mamba module from {pretrain_mamba_module}")
                 ckpt = torch.load(pretrain_mamba_module, map_location='cpu')
                 def get_w(weights, keyword):
                     return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}

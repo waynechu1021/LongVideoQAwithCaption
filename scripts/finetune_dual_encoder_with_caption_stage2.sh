@@ -1,7 +1,7 @@
 #!/bin/sh
 
 export PYTHONPATH=`pwd`:$PYTHONPATH
-export DATASET_DIR=playground/data
+export DATASET_DIR=/hdd2/zwy/VideoGPT-plus_Training_Dataset
 
 BASE_LLM_PATH=.cache/Phi-3-mini-128k-instruct
 VISION_TOWER=.cache/InternVideo2-Stage2_1B-224p-f4
@@ -9,10 +9,10 @@ IMAGE_VISION_TOWER=.cache/clip-vit-large-patch14-336
 PROJECTOR_TYPE=mlp2x_gelu
 PRETRAIN_VIDEO_MLP_PATH=.cache/phi3_mini_4k_128k_pretrain/mlp2x_gelu_internvideo2/mm_projector.bin
 PRETRAIN_IMAGE_MLP_PATH=.cache/phi3_mini_4k_128k_pretrain/mlp2x_gelu_clip_l14_336px/mm_projector.bin
-OUTPUT_DIR_PATH=results/videogpt_plus_finetune_with_caption_stage1_test
+OUTPUT_DIR_PATH=results/videogpt_plus_finetune_with_caption_stage2
 
 # deepspeed --include localhost:6 videogpt_plus/train/train.py \
-CUDA_VISIBLE_DEVICES=7 deepspeed --master_port 25400 videogpt_plus/train/train.py \
+CUDA_VISIBLE_DEVICES=5 deepspeed --master_port 25400 videogpt_plus/train/train.py \
 --lora_enable True --lora_r 128 --lora_alpha 256 --mm_projector_lr 2e-5 \
 --deepspeed scripts/zero3.json \
 --model_name_or_path "$BASE_LLM_PATH" \
@@ -28,6 +28,8 @@ CUDA_VISIBLE_DEVICES=7 deepspeed --master_port 25400 videogpt_plus/train/train.p
 --image_mm_projector_type "$PROJECTOR_TYPE" \
 --pretrain_mm_mlp_adapter "$PRETRAIN_VIDEO_MLP_PATH" \
 --pretrain_image_mm_mlp_adapter "$PRETRAIN_IMAGE_MLP_PATH" \
+--pretrained_tor_and_projector_module results/videogpt_plus_finetune_with_caption_stage1/tor_and_projector_module.bin \
+--pretrain_mamba_module results/videogpt_plus_finetune_with_caption_stage1/mamba_module.bin \
 --mm_vision_select_layer -2 \
 --mm_use_im_start_end False \
 --mm_use_im_patch_token False \

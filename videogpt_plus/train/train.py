@@ -1091,9 +1091,8 @@ def train():
     model.config.image_grid_pinpoints = data_args.image_grid_pinpoints
 
     model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
-    model.requires_grad_(False)
     if model_args.tune_mm_mlp_adapter:
-        # model.requires_grad_(False)
+        model.requires_grad_(False)
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = True
         for p in model.get_model().image_mm_projector.parameters():
@@ -1139,7 +1138,8 @@ def train():
             padding_side="right")
         mamba_tokenizer.add_tokens([DEFAULT_TOR_TOKRN],special_tokens=True)
         model.config.stage = data_args.stage = training_args.stage
-        
+        if model.config.stage == 1:
+            model.requires_grad_(False)
         model.get_model().initialize_mamba_and_tor_modules(model_args)
         for p in model.get_model().mamba.parameters():
             p.requires_grad = True
