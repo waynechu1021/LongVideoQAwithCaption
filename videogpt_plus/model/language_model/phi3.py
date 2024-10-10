@@ -128,7 +128,6 @@ class VideoGPTPlusPhi3ForCausalLM(Phi3ForCausalLM, VideoGPTPlusMetaForCausalLM):
                     output_hidden_states=output_hidden_states,
                     return_dict=return_dict
                 )
-                #FIXME there is a BUG of device assertion error when using debugpy mode
                 hidden_states = outputs[0]
                 logits = self.lm_head(hidden_states)
             else:

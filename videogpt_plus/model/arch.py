@@ -20,7 +20,7 @@ class MetaModel:
             self.image_mm_projector = build_vision_projector(config, image_mm_projector=True)
         if hasattr(config,'mm_mamba'):
             self.mamba = MeteorMambaForCausalLM.from_pretrained(config.mm_mamba)
-            self.mamba.resize_token_embeddings(32064)
+            # self.mamba.resize_token_embeddings(32064)
             self.mamba.build_vision_projector(self.get_vision_tower().hidden_size, self.mamba.config.hidden_size)
             self.mamba.build_image_vision_projector(self.get_image_vision_tower().hidden_size, self.mamba.config.hidden_size)
 
@@ -97,7 +97,6 @@ class MetaModel:
         pretrain_tor_embedding = model_args.pretrain_tor_embedding
         mamba_hidden_size = self.mamba.config.hidden_size 
         self.max_num_of_tor = getattr(model_args,'max_num_of_tor',None)
-        self.tor_embedding = torch.nn.Parameter(torch.randn(100, mamba_hidden_size))
         self.tor_projector = torch.nn.Sequential(
             torch.nn.Linear(mamba_hidden_size,self.config.hidden_size),
             torch.nn.GELU(),
@@ -114,23 +113,21 @@ class MetaModel:
             print('load tor_projector',msg)
     
         if pretrain_tor_embedding is not None:
-            print(f"Initializing tor embedding from {pretrain_tor_adapter}")
+            print(f"Initializing tor embedding from {pretrain_tor_embedding}")
             tor_embedding_weights = torch.load(pretrain_tor_embedding, map_location='cpu')
 
             def get_w(weights, keyword):
-                return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
+                return {k.split(keyword)[1]+keyword: v for k, v in weights.items() if keyword in k}
 
-            msg = self.tor_embedding.load_state_dict(get_w(tor_embedding_weights, 'tor_embedding'))
-            print('load tor_embedding',msg)
+            self.tor_embedding = torch.nn.Parameter(get_w(tor_embedding_weights, 'tor_embedding')['tor_embedding'])
+            print('load tor_embedding successfully')
+        else:
+            self.tor_embedding = torch.nn.Parameter(torch.randn(100, mamba_hidden_size))
 
     def initialize_mamba_and_tor_modules(self,model_args):
         if model_args.mamba_name_or_path is not None:
             self.config.mm_mamba = model_args.mamba_name_or_path
             self.mamba = MeteorMambaForCausalLM.from_pretrained(model_args.mamba_name_or_path)
-            # replacing embedding size of mamba with that of meteor
-            # FIXME the number of vocab size should be changed according to the llm
-            # self.mamba.backbone.embeddings = torch.nn.Embedding(num_embeddings=32064,
-            #                                         embedding_dim=self.mamba.config.hidden_size)
             # self.mamba.resize_token_embeddings(32064)
             self.mamba.build_vision_projector(self.get_vision_tower().hidden_size, self.mamba.config.hidden_size)
             self.mamba.build_image_vision_projector(self.get_image_vision_tower().hidden_size, self.mamba.config.hidden_size)
