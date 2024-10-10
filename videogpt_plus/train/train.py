@@ -67,6 +67,7 @@ class ModelArguments:
     pretrain_tor_embedding: Optional[str] = field(default=None)
     pretrain_mamba_module: Optional[str] = field(default=None)
     mamba_name_or_path: Optional[str] = field(default=None)
+    max_num_of_tor: Optional[int] = field(default=20)
 
 
 @dataclass

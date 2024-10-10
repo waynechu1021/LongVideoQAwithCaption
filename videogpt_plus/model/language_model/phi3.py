@@ -12,6 +12,7 @@ class VideoGPTPlusConfig(Phi3Config):
     model_type = "VideoGPT+"
     tor_token_index = TOR_TOKEN_INDEX
     tor_token_index_mamba = TOR_TOKEN_INDEX_MAMBA
+    image_token_index = IMAGE_TOKEN_INDEX
 
 
 class VideoGPTPlusPhi3Model(MetaModel, Phi3Model):
@@ -94,7 +95,42 @@ class VideoGPTPlusPhi3ForCausalLM(Phi3ForCausalLM, VideoGPTPlusMetaForCausalLM):
                 hidden_states = self.remove_tor_features(hidden_states,input_ids_llm,labels)
                 logits = self.lm_head(hidden_states)
             elif getattr(self.config,'stage',None) == 2:
-                pass
+                input_ids, attention_mask, attention_mask_llm, past_key_values, inputs_embeds, inputs_embeds_llm, labels = self.prepare_inputs_labels_for_meteor(
+                    input_ids, input_ids_llm, attention_mask, attention_mask_llm, past_key_values, labels, images, context_images, self.config.stage)
+                '''examine the input_embed only suitable for stage2 and without tune_mm_mlp_adapter and mm_use_im_start_end'''
+                # for i in range(inputs_embeds.shape[0]):
+                #     image_token_index = torch.where(input_ids_llm[i]==self.config.image_token_index)
+                #     input_ids_llm_image = input_ids_llm[i][image_token_index]
+                #     inputs_embeds_llm_image = inputs_embeds_llm[i][image_token_index[0][-1]-16+3329:image_token_index[0][-1]-16+3329+self.get_model().max_num_of_tor]
+                #     tor_embed = self.get_model().tor_projector(self.get_model().tor_embedding[:self.get_model().max_num_of_tor])
+                #     iftrue = torch.all(inputs_embeds_llm_image == tor_embed)
+                #     print(iftrue)
+                #     image_token_index = torch.where(input_ids[i]==self.config.image_token_index)
+                #     input_ids_image = input_ids[i][image_token_index]
+                #     inputs_embeds_image = inputs_embeds[i][image_token_index[0][-1]-16+3329:image_token_index[0][-1]-16+3329+self.get_model().max_num_of_tor]
+                #     tor_embed = self.get_model().tor_embedding[:self.get_model().max_num_of_tor]
+                #     iftrue = torch.all(inputs_embeds_image == tor_embed)
+                #     print(iftrue)
+                mamba_outputs = self.get_model().mamba(
+                    inputs_embeds = inputs_embeds,
+                    return_dict = return_dict,
+                )
+                last_hidden_states = mamba_outputs.last_hidden_state.to(inputs_embeds_llm.dtype)
+                # the number of event is not always the same in a batch
+                inputs_embeds_llm = self.merge_input_embeds_with_tor_features(last_hidden_states,input_ids,input_ids_llm,inputs_embeds_llm, stage=self.config.stage)
+                outputs = self.model(
+                    input_ids=None,
+                    attention_mask=attention_mask_llm,
+                    past_key_values=past_key_values,
+                    inputs_embeds=inputs_embeds_llm,
+                    use_cache=use_cache,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict
+                )
+                #FIXME there is a BUG of device assertion error when using debugpy mode
+                hidden_states = outputs[0]
+                logits = self.lm_head(hidden_states)
             else:
                 raise NotImplementedError
         else:
