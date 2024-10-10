@@ -12,13 +12,15 @@ PRETRAIN_IMAGE_MLP_PATH=.cache/phi3_mini_4k_128k_pretrain/mlp2x_gelu_clip_l14_33
 OUTPUT_DIR_PATH=results/videogpt_plus_finetune_with_caption_stage1_test
 
 # deepspeed --include localhost:6 videogpt_plus/train/train.py \
-# --lora_enable True --lora_r 128 --lora_alpha 256 --mm_projector_lr 2e-5 \
 CUDA_VISIBLE_DEVICES=7 deepspeed --master_port 25400 videogpt_plus/train/train.py \
+--lora_enable True --lora_r 128 --lora_alpha 256 --mm_projector_lr 2e-5 \
 --deepspeed scripts/zero3.json \
 --model_name_or_path "$BASE_LLM_PATH" \
 --version phi3_instruct \
---dataset_use STAGE1 \
---use_caption True \
+--dataset_use STAGE2 \
+--use_caption False \
+--stage 2 \
+--max_num_of_tor 20 \
 --vision_tower "$VISION_TOWER" \
 --image_vision_tower "$IMAGE_VISION_TOWER" \
 --mamba_name_or_path '.cache/mamba-130m-hf' \
