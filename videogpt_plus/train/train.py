@@ -63,11 +63,10 @@ class ModelArguments:
     image_mm_projector_type: Optional[str] = field(default='mlp2x_gelu')
     mm_use_box_start_end: bool = field(default=False)
 
-    pretrain_tor_adapter: Optional[str] = field(default=None)
-    pretrain_tor_embedding: Optional[str] = field(default=None)
+    pretrained_tor_and_projector_module: Optional[str] = field(default=None)
     pretrain_mamba_module: Optional[str] = field(default=None)
     mamba_name_or_path: Optional[str] = field(default=None)
-    max_num_of_tor: Optional[int] = field(default=20)
+    max_num_of_tor: Optional[int] = field(default=None)
 
 
 @dataclass
@@ -218,9 +217,9 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer,
     #             torch.save(weight_to_save, os.path.join(output_dir, f'mm_projector.bin'))
 
     if trainer.args.stage == 1:
-        keys_to_match = ['mamba', "tor_embedding", "tor_projector"]
+        keys_to_match = ['mamba']
         weight_to_save = get_mm_adapter_state_maybe_zero_3(trainer.model.named_parameters(), keys_to_match)
-        trainer.model.config.save_pretrained(output_dir)
+        trainer.model.get_model().mamba.config.save_pretrained(output_dir)
 
         current_folder = output_dir.split('/')[-1]
         parent_folder = os.path.dirname(output_dir)
@@ -231,6 +230,20 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer,
                 torch.save(weight_to_save, os.path.join(mm_projector_folder, f'{current_folder}.bin'))
             else:
                 torch.save(weight_to_save, os.path.join(output_dir, f'mamba_module.bin'))
+        
+        keys_to_match = ["tor_embedding", "tor_projector", "vision_projector", "image_vision_projector"]
+        weight_to_save = get_mm_adapter_state_maybe_zero_3(trainer.model.named_parameters(), keys_to_match)
+        trainer.model.config.save_pretrained(output_dir)
+
+        current_folder = output_dir.split('/')[-1]
+        parent_folder = os.path.dirname(output_dir)
+        if trainer.args.local_rank == 0 or trainer.args.local_rank == -1:
+            if current_folder.startswith('checkpoint-'):
+                mm_projector_folder = os.path.join(parent_folder, "tor_and_projector_module")
+                os.makedirs(mm_projector_folder, exist_ok=True)
+                torch.save(weight_to_save, os.path.join(mm_projector_folder, f'{current_folder}.bin'))
+            else:
+                torch.save(weight_to_save, os.path.join(output_dir, f'tor_and_projector_module.bin'))
         return
 
     if trainer.deepspeed:
@@ -1078,8 +1091,9 @@ def train():
     model.config.image_grid_pinpoints = data_args.image_grid_pinpoints
 
     model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
+    model.requires_grad_(False)
     if model_args.tune_mm_mlp_adapter:
-        model.requires_grad_(False)
+        # model.requires_grad_(False)
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = True
         for p in model.get_model().image_mm_projector.parameters():
@@ -1125,11 +1139,15 @@ def train():
             padding_side="right")
         mamba_tokenizer.add_tokens([DEFAULT_TOR_TOKRN],special_tokens=True)
         model.config.stage = data_args.stage = training_args.stage
-        model.requires_grad_(False)
+        
         model.get_model().initialize_mamba_and_tor_modules(model_args)
         for p in model.get_model().mamba.parameters():
             p.requires_grad = True
         for p in model.get_model().tor_projector.parameters():
+            p.requires_grad = True
+        for p in model.get_model().vision_projector.parameters():
+            p.requires_grad = True
+        for p in model.get_model().image_vision_projector.parameters():
             p.requires_grad = True
         model.get_model().tor_embedding.requires_grad = True
     trainable_params = []

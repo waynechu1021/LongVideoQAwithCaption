@@ -37,33 +37,6 @@ class MeteorMambaForCausalLM(MambaForCausalLM):
     def __init__(self, config):
         super().__init__(config)
 
-    def build_vision_projector(self, mm_hidden_size, hidden_size):
-        projector_type = 'mlp2x_gelu'
-        mlp_gelu_match = re.match(r'^mlp(\d+)x_gelu$', projector_type)
-        if mlp_gelu_match:
-            mlp_depth = int(mlp_gelu_match.group(1))
-            modules = [nn.Linear(mm_hidden_size, hidden_size)]
-            for _ in range(1, mlp_depth):
-                modules.append(nn.GELU())
-                modules.append(nn.Linear(hidden_size, hidden_size))
-            self.vision_projector = nn.Sequential(*modules)
-        else:
-            raise ValueError(f'Unknown projector type: {projector_type}')
-    
-    def build_image_vision_projector(self, mm_hidden_size, hidden_size):
-        projector_type = 'mlp2x_gelu'
-        mlp_gelu_match = re.match(r'^mlp(\d+)x_gelu$', projector_type)
-        if mlp_gelu_match:
-            mlp_depth = int(mlp_gelu_match.group(1))
-            modules = [nn.Linear(mm_hidden_size, hidden_size)]
-            for _ in range(1, mlp_depth):
-                modules.append(nn.GELU())
-                modules.append(nn.Linear(hidden_size, hidden_size))
-            self.image_vision_projector = nn.Sequential(*modules)
-        else:
-            raise ValueError(f'Unknown projector type: {projector_type}')
-    
-
     def forward(
         self,
         inputs_embeds: Optional[torch.FloatTensor] = None,

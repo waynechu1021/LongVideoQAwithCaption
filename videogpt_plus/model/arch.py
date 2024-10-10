@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import torch
 from .multimodal_encoder.builder import build_vision_tower
 from videogpt_plus.constants import *
-from .multimodal_projector.builder import build_vision_projector
+from .multimodal_projector.builder import build_vision_projector, build_image_vision_projector_mamba, build_vision_projector_mamba
 from einops import rearrange
 import math
 import torch.nn.functional as F
@@ -21,8 +21,8 @@ class MetaModel:
         if hasattr(config,'mm_mamba'):
             self.mamba = MeteorMambaForCausalLM.from_pretrained(config.mm_mamba)
             # self.mamba.resize_token_embeddings(32064)
-            self.mamba.build_vision_projector(self.get_vision_tower().hidden_size, self.mamba.config.hidden_size)
-            self.mamba.build_image_vision_projector(self.get_image_vision_tower().hidden_size, self.mamba.config.hidden_size)
+            self.vision_projector = build_vision_projector_mamba(self.get_vision_tower().hidden_size, self.mamba.config.hidden_size)
+            self.image_vision_projector = build_image_vision_projector_mamba(self.get_image_vision_tower().hidden_size, self.mamba.config.hidden_size)
 
     def get_vision_tower(self):
         vision_tower = getattr(self, 'vision_tower', None)
@@ -93,8 +93,7 @@ class MetaModel:
             print('load image_mm_projector',msg)
 
     def initialize_tor_modules(self,model_args):
-        pretrain_tor_adapter = model_args.pretrain_tor_adapter
-        pretrain_tor_embedding = model_args.pretrain_tor_embedding
+        pretrained_tor_and_projector_module = model_args.pretrained_tor_and_projector_module
         mamba_hidden_size = self.mamba.config.hidden_size 
         self.max_num_of_tor = getattr(model_args,'max_num_of_tor',None)
         self.tor_projector = torch.nn.Sequential(
@@ -102,46 +101,57 @@ class MetaModel:
             torch.nn.GELU(),
             torch.nn.Linear(self.config.hidden_size,self.config.hidden_size),
         )
-        if pretrain_tor_adapter is not None:
-            print(f"Initializing tor projector from {pretrain_tor_adapter}")
-            tor_projector_weights = torch.load(pretrain_tor_adapter, map_location='cpu')
+        if pretrained_tor_and_projector_module is not None:
+            print(f"Initializing tor projector from {pretrained_tor_and_projector_module}")
+            tor_and_projector_module_weights = torch.load(pretrained_tor_and_projector_module, map_location='cpu')
 
-            def get_w(weights, keyword):
-                return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
+            def get_w(weights, keyword, ignore_keyword=None):
+                if ignore_keyword is None:
+                    return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
+                else:
+                    return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k and ignore_keyword not in k}
 
-            msg = self.tor_projector.load_state_dict(get_w(tor_projector_weights, 'tor_projector'))
+            msg = self.tor_projector.load_state_dict(get_w(tor_and_projector_module_weights, 'tor_projector'))
             print('load tor_projector',msg)
+
+            print(f"Initializing image_vision_projector from {pretrained_tor_and_projector_module}")
+            self.image_vision_projector.load_state_dict(get_w(tor_and_projector_module_weights, 'image_vision_projector'))
+            print('load image_mm_projector',msg)
+            
+            print(f"Initializing vision_projector from {pretrained_tor_and_projector_module}")
+            self.vision_projector.load_state_dict(get_w(tor_and_projector_module_weights, 'vision_projector','image_vision_projector'))
+            print('load vision_projector',msg)
     
-        if pretrain_tor_embedding is not None:
-            print(f"Initializing tor embedding from {pretrain_tor_embedding}")
-            tor_embedding_weights = torch.load(pretrain_tor_embedding, map_location='cpu')
+            print(f"Initializing tor embedding from {pretrained_tor_and_projector_module}")
 
             def get_w(weights, keyword):
                 return {k.split(keyword)[1]+keyword: v for k, v in weights.items() if keyword in k}
 
-            self.tor_embedding = torch.nn.Parameter(get_w(tor_embedding_weights, 'tor_embedding')['tor_embedding'])
+            self.tor_embedding = torch.nn.Parameter(get_w(tor_and_projector_module_weights, 'tor_embedding')['tor_embedding'])
             print('load tor_embedding successfully')
         else:
             self.tor_embedding = torch.nn.Parameter(torch.randn(100, mamba_hidden_size))
 
     def initialize_mamba_and_tor_modules(self,model_args):
         if model_args.mamba_name_or_path is not None:
-            self.config.mm_mamba = model_args.mamba_name_or_path
-            self.mamba = MeteorMambaForCausalLM.from_pretrained(model_args.mamba_name_or_path)
-            # self.mamba.resize_token_embeddings(32064)
-            self.mamba.build_vision_projector(self.get_vision_tower().hidden_size, self.mamba.config.hidden_size)
-            self.mamba.build_image_vision_projector(self.get_image_vision_tower().hidden_size, self.mamba.config.hidden_size)
-            self.initialize_tor_modules(model_args)
             pretrain_mamba_module = model_args.pretrain_mamba_module
+            self.config.mm_mamba = model_args.mamba_name_or_path 
+            self.mamba = MeteorMambaForCausalLM.from_pretrained(model_args.mamba_name_or_path)
+            del self.mamba.lm_head
+            # self.mamba.resize_token_embeddings(32064)
             if pretrain_mamba_module is not None:
-                print(f"Initializing tor projector from {pretrain_mamba_module}")
-                mamba_module_weights = torch.load(pretrain_mamba_module, map_location='cpu')
-
+                print(f"Initializing mamba module from {pretrain_mamba_module}")
+                ckpt = torch.load(pretrain_mamba_module, map_location='cpu')
                 def get_w(weights, keyword):
                     return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
+                # self.mamba.load_state_dict(get_w(ckpt,'mamba'))
+                from videogpt_plus.mm_utils import load_zero_partitions
+                load_zero_partitions(self.mamba,get_w(ckpt,'mamba'),True,pretrain_mamba_module)
+                
+            self.vision_projector = build_vision_projector_mamba(self.get_vision_tower().hidden_size, self.mamba.config.hidden_size)
+            self.image_vision_projector = build_image_vision_projector_mamba(self.get_image_vision_tower().hidden_size, self.mamba.config.hidden_size)
+            self.initialize_tor_modules(model_args)
 
-                msg = self.mamba.load_state_dict(get_w(mamba_module_weights, 'mamba'))
-                print('load mamba_module',msg)
 
 
 def apply_adaptive_avg_pooling(x, shape=(12, 12)):
@@ -213,7 +223,7 @@ class VideoGPTPlusMetaForCausalLM(ABC):
     def project(self, video_features, context_features=None, input_type="image", is_mamba = False):
         if input_type == "video":
             if is_mamba:
-                video_features = self.get_model().mamba.vision_projector(video_features.to(torch.bfloat16))
+                video_features = self.get_model().vision_projector(video_features.to(torch.bfloat16))
             else:
                 video_features = self.get_model().mm_projector(video_features.to(torch.bfloat16))
             video_features = rearrange(video_features, 'b (t l) d -> (b t) l d', t=4)  # t=4 - chunk size
@@ -221,7 +231,7 @@ class VideoGPTPlusMetaForCausalLM(ABC):
             video_features = rearrange(video_features, '(b t) l d -> b (t l) d', t=4)  # t=4 - chunk size
 
             if is_mamba:
-                context_image_features = self.get_model().mamba.image_vision_projector(context_features)
+                context_image_features = self.get_model().image_vision_projector(context_features)
             else:
                 context_image_features = self.get_model().image_mm_projector(context_features)
             context_image_features = apply_adaptive_avg_pooling(context_image_features,
@@ -532,7 +542,7 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                 # Multimodal LLM, but the current sample is not multimodal
                 cur_input_embeds = self.get_model().mamba.backbone.embeddings(cur_input_ids)
                 cur_input_embeds = cur_input_embeds + (
-                        0. * self.get_model().mamba.vision_projector(vision_tower.dummy_feature)).sum()
+                        0. * self.get_model().vision_projector(vision_tower.dummy_feature)).sum()
                 new_input_embeds.append(cur_input_embeds)
 
                 cur_input_embeds_llm = self.get_model().embed_tokens(cur_input_ids_llm)
