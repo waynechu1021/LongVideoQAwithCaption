@@ -654,15 +654,11 @@ def preprocess_meteor(
 ) -> Dict:
     phi3_dict = preprocess_phi3(sources,tokenizer,has_image)
     mamba_dict = preprocess_mamba(sources, mamba_tokenizer, has_image)
-    # return dict(
-    #     input_ids=phi3_dict['input_ids'],
-    #     input_ids_llm = phi3_dict['labels'][phi3_dict['labels']>=0].unsqueeze(0) if stage == 1 else phi3_dict['input_ids'],
-    #     labels = phi3_dict['labels'][phi3_dict['labels']>=0].unsqueeze(0) if stage == 1 else phi3_dict['labels'],
-    # )
+
     tmp = phi3_dict['labels'][phi3_dict['labels']!=TOR_TOKEN_INDEX]
     return dict(
-        input_ids=mamba_dict['input_ids'],
-        input_ids_llm = phi3_dict['labels'][phi3_dict['labels']>=0].unsqueeze(0) if stage == 1 else phi3_dict['input_ids'],
+        input_ids_mamba=mamba_dict['input_ids'],
+        input_ids = phi3_dict['labels'][phi3_dict['labels']>=0].unsqueeze(0) if stage == 1 else phi3_dict['input_ids'],
         labels = tmp[tmp>=0].unsqueeze(0) if stage == 1 else phi3_dict['labels'],
     )
 
@@ -858,7 +854,7 @@ class LazySupervisedDataset(Dataset):
                 stage = self.data_args.stage)
 
         if isinstance(i, int):
-            data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0], input_ids_llm = data_dict["input_ids_llm"][0])
+            data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0], input_ids_mamba = data_dict["input_ids_mamba"][0])
 
         # Image exists in the data
         if 'image' in self.list_data_dict[i]:
@@ -885,27 +881,27 @@ class DataCollatorForSupervisedDataset(object):
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         input_ids, labels = tuple([instance[key] for instance in instances]
                                   for key in ("input_ids", "labels"))
-        input_ids_llm = [instance['input_ids_llm'] for instance in instances]
+        input_ids_mamba = [instance['input_ids_mamba'] for instance in instances]
         input_ids = torch.nn.utils.rnn.pad_sequence(
             input_ids,
             batch_first=True,
-            padding_value=self.mamba_tokenizer.pad_token_id)
-        input_ids_llm = torch.nn.utils.rnn.pad_sequence(
-            input_ids_llm,
-            batch_first=True,
             padding_value=self.tokenizer.pad_token_id)
+        input_ids_mamba = torch.nn.utils.rnn.pad_sequence(
+            input_ids_mamba,
+            batch_first=True,
+            padding_value=self.mamba_tokenizer.pad_token_id)
         labels = torch.nn.utils.rnn.pad_sequence(labels,
                                                  batch_first=True,
                                                  padding_value=IGNORE_INDEX)
         input_ids = input_ids[:, :self.tokenizer.model_max_length]
-        input_ids_llm = input_ids_llm[:, :self.tokenizer.model_max_length]
+        input_ids_mamba = input_ids_mamba[:, :self.tokenizer.model_max_length]
         labels = labels[:, :self.tokenizer.model_max_length]
         batch = dict(
             input_ids=input_ids,
-            input_ids_llm=input_ids_llm,
+            input_ids_mamba=input_ids_mamba,
             labels=labels,
-            attention_mask=input_ids.ne(self.mamba_tokenizer.pad_token_id),
-            attention_mask_llm=input_ids_llm.ne(self.tokenizer.pad_token_id),
+            attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+            attention_mask_mamba=input_ids_mamba.ne(self.mamba_tokenizer.pad_token_id),
         )
 
         if 'image' in instances[0]:  # Alternatively if 'context_image' in instances[0]

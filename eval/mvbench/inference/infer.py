@@ -7,6 +7,7 @@ from videogpt_plus.mm_utils import tokenizer_image_token, get_model_name_from_pa
 from eval.mvbench.inference.ddp import *
 from torch.utils.data import DataLoader, DistributedSampler
 import traceback
+import transformers
 
 
 def disable_torch_init():
@@ -48,7 +49,10 @@ def eval_model(args):
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(args.model_path)
     tokenizer, model, image_processor, context_len = load_pretrained_model(model_path, args.model_base, model_name)
-
+    mamba_tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model.config.mm_mamba,
+            padding_side="right")
+    model.config.stage = 2
     mm_use_im_start_end = getattr(model.config, "mm_use_im_start_end", False)
     mm_use_im_patch_token = getattr(model.config, "mm_use_im_patch_token", True)
     if mm_use_im_patch_token:
@@ -69,13 +73,15 @@ def eval_model(args):
 
     dataset = EvalDatasetMvBench(args.question_dir, args.video_folder, image_processor,
                                  video_processor, mvbench_data_list)
-    distributed_sampler = DistributedSampler(dataset, rank=args.rank, shuffle=False)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size_per_gpu, num_workers=4, sampler=distributed_sampler)
+    # distributed_sampler = DistributedSampler(dataset, rank=args.rank, shuffle=False)
+    # dataloader = DataLoader(dataset, batch_size=args.batch_size_per_gpu, num_workers=4, sampler=distributed_sampler)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size_per_gpu, num_workers=0, shuffle=True)
 
     for (idx, sample_set, video_frames, context_frames, slice_len) in tqdm(dataloader):
         idx, sample_set, video_frames, context_frames, slice_len = int(idx[0]), sample_set[
             0], video_frames, context_frames, int(slice_len[0])
-
+        if video_frames is None:
+            continue
         sample = sample_set
         qs = sample['Q'][0]
 
@@ -93,15 +99,24 @@ def eval_model(args):
 
             input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX,
                                               return_tensors='pt').unsqueeze(0).cuda()
+            
+            conv_mamba = conv_templates['mamba'].copy()
+            conv_mamba.append_message(conv_mamba.roles[0], qs)
+            conv_mamba.append_message(conv_mamba.roles[1], None)
+            prompt = conv_mamba.get_prompt()
+
+            input_ids_mamba = tokenizer_image_token(prompt, mamba_tokenizer, IMAGE_TOKEN_INDEX,
+                                              return_tensors='pt').unsqueeze(0).cuda()
 
             # stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
             stop_str = "<|end|>"
 
             with torch.inference_mode():
                 output_ids = model.generate(
-                    input_ids,
-                    images=torch.cat(video_frames, dim=0).half().cuda(),
-                    context_images=torch.cat(context_frames, dim=0).half().cuda(),
+                    input_ids_mamba=input_ids_mamba,
+                    input_ids=input_ids,
+                    images=torch.cat(video_frames, dim=0).to(torch.bfloat16).cuda(),
+                    context_images=torch.cat(context_frames, dim=0).to(torch.bfloat16).cuda(),
                     do_sample=True if args.temperature > 0 else False,
                     temperature=args.temperature,
                     top_p=args.top_p,

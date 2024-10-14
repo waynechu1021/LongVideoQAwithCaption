@@ -160,6 +160,7 @@ conv_templates = {
     "plain": conv_plain,
     "v1": conv_v1,
     "phi3_instruct": conv_phi3_instruct,
+    "mamba":conv_mamba
 }
 
 if __name__ == "__main__":

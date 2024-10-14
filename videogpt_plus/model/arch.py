@@ -30,7 +30,8 @@ class MetaModel:
             torch.nn.GELU(),
             torch.nn.Linear(self.config.hidden_size,self.config.hidden_size),
         )
-            self.tor_embedding = torch.nn.Parameter(torch.randn(self.config.max_num_of_tor, self.mamba.config.hidden_size))
+            self.max_num_of_tor = getattr(self.config,'max_num_of_tor',None)
+            self.tor_embedding = torch.nn.Parameter(torch.randn(100, self.mamba.config.hidden_size))
 
     def get_vision_tower(self):
         vision_tower = getattr(self, 'vision_tower', None)
@@ -524,21 +525,21 @@ class VideoGPTPlusMetaForCausalLM(ABC):
 
         return None, attention_mask, past_key_values, new_input_embeds, new_labels
 
-    def prepare_inputs_labels_for_meteor(self, input_ids, input_ids_llm, attention_mask, attention_mask_llm, past_key_values, labels, images,
+    def prepare_inputs_labels_for_meteor(self, input_ids_mamba, input_ids_llm, attention_mask, attention_mask_llm, past_key_values, labels, images,
                                              context_images, stage = 1):
         vision_tower = self.get_vision_tower()
         image_vision_tower = self.get_image_vision_tower()
-        if (vision_tower is None and image_vision_tower is None) or images is None or input_ids.shape[1] == 1:
-            if past_key_values is not None and vision_tower is not None and images is not None and input_ids.shape[
+        if (vision_tower is None and image_vision_tower is None) or images is None or input_ids_llm.shape[1] == 1:
+            if past_key_values is not None and vision_tower is not None and images is not None and input_ids_llm.shape[
                 1] == 1:
-                attention_mask = torch.ones(
-                    (attention_mask.shape[0], past_key_values[-1][-1].shape[-2] + 1), dtype=attention_mask.dtype,
-                    device=attention_mask.device
+                attention_mask_llm = torch.ones(
+                    (attention_mask_llm.shape[0], past_key_values[-1][-1].shape[-2] + 1), dtype=attention_mask_llm.dtype,
+                    device=attention_mask_llm.device
                 )
-            return input_ids, attention_mask, past_key_values, None, labels
+            return input_ids_mamba, input_ids_llm, attention_mask, attention_mask_llm, past_key_values, None, None, labels
 
         if images is not None and context_images is not None:
-            video_features, context_features = self.encode_videos(images, context_images, batch_size=input_ids.shape[0])
+            video_features, context_features = self.encode_videos(images, context_images, batch_size=input_ids_mamba.shape[0])
         elif images is not None:
             image_features = self.encode_images(images)
         
@@ -547,7 +548,7 @@ class VideoGPTPlusMetaForCausalLM(ABC):
         new_input_embeds_llm = []
         new_labels = [] if labels is not None else None
         cur_image_idx = 0
-        for batch_idx, cur_input_ids in enumerate(input_ids):
+        for batch_idx, cur_input_ids in enumerate(input_ids_mamba):
             cur_input_ids_llm = input_ids_llm[batch_idx]
             if (cur_input_ids == IMAGE_TOKEN_INDEX).sum() == 0:
                 # Multimodal LLM, but the current sample is not multimodal
@@ -898,7 +899,7 @@ class VideoGPTPlusMetaForCausalLM(ABC):
 
             if attention_mask is not None:
                 new_attn_mask_pad_left = torch.full(
-                    (attention_mask.shape[0], new_input_embeds.shape[1] - input_ids.shape[1]), True,
+                    (attention_mask.shape[0], new_input_embeds.shape[1] - input_ids_mamba.shape[1]), True,
                     dtype=attention_mask.dtype, device=attention_mask.device
                 )
                 attention_mask = torch.cat((new_attn_mask_pad_left, attention_mask), dim=1)
@@ -911,7 +912,7 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                 attention_mask_llm = torch.cat((new_attn_mask_pad_left, attention_mask_llm), dim=1)
                 assert attention_mask_llm.shape == new_input_embeds_llm.shape[:2]
 
-        return input_ids, attention_mask, attention_mask_llm, past_key_values, new_input_embeds, new_input_embeds_llm, new_labels
+        return input_ids_mamba, input_ids_llm, attention_mask, attention_mask_llm, past_key_values, new_input_embeds, new_input_embeds_llm, new_labels
 
     def initialize_vision_tokenizer(self, model_args, tokenizer):
         if model_args.mm_use_im_patch_token:
