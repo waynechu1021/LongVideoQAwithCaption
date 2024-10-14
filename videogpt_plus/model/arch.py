@@ -21,9 +21,16 @@ class MetaModel:
             self.image_mm_projector = build_vision_projector(config, image_mm_projector=True)
         if hasattr(config,'mm_mamba'):
             self.mamba = MeteorMambaForCausalLM.from_pretrained(config.mm_mamba)
+            del self.mamba.lm_head
             # self.mamba.resize_token_embeddings(32064)
             self.vision_projector = build_vision_projector_mamba(self.get_vision_tower().hidden_size, self.mamba.config.hidden_size)
             self.image_vision_projector = build_image_vision_projector_mamba(self.get_image_vision_tower().hidden_size, self.mamba.config.hidden_size)
+            self.tor_projector = torch.nn.Sequential(
+            torch.nn.Linear(self.mamba.config.hidden_size,self.config.hidden_size),
+            torch.nn.GELU(),
+            torch.nn.Linear(self.config.hidden_size,self.config.hidden_size),
+        )
+            self.tor_embedding = torch.nn.Parameter(torch.randn(self.config.max_num_of_tor, self.mamba.config.hidden_size))
 
     def get_vision_tower(self):
         vision_tower = getattr(self, 'vision_tower', None)
@@ -98,6 +105,8 @@ class MetaModel:
         pretrained_tor_and_projector_module = model_args.pretrained_tor_and_projector_module
         mamba_hidden_size = self.mamba.config.hidden_size 
         self.max_num_of_tor = getattr(model_args,'max_num_of_tor',None)
+        if self.max_num_of_tor is not None:
+            self.config.max_num_of_tor = model_args.max_num_of_tor 
         self.tor_projector = torch.nn.Sequential(
             torch.nn.Linear(mamba_hidden_size,self.config.hidden_size),
             torch.nn.GELU(),
