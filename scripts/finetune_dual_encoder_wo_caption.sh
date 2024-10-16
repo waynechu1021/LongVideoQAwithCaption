@@ -1,25 +1,22 @@
 #!/bin/sh
 
 export PYTHONPATH=`pwd`:$PYTHONPATH
-export DATASET_DIR=playground/data
+export DATASET_DIR=playground/VideoGPT-plus_Training_Dataset
 
 BASE_LLM_PATH=.cache/Phi-3-mini-128k-instruct
 VISION_TOWER=.cache/InternVideo2-Stage2_1B-224p-f4
 IMAGE_VISION_TOWER=.cache/clip-vit-large-patch14-336
 PROJECTOR_TYPE=mlp2x_gelu
-PRETRAIN_VIDEO_MLP_PATH=.cache/VideoGPT-plus_Phi3-mini-4k_Pretrain/mlp2x_gelu_internvideo2/mm_projector.bin
-PRETRAIN_IMAGE_MLP_PATH=.cache/VideoGPT-plus_Phi3-mini-4k_Pretrain/mlp2x_gelu_clip_l14_336px/mm_projector.bin
-OUTPUT_DIR_PATH=results/videogpt_plus_finetune_wo_caption-test
+PRETRAIN_VIDEO_MLP_PATH=.cache/phi3_mini_4k_128k_pretrain/mlp2x_gelu_internvideo2/mm_projector.bin
+PRETRAIN_IMAGE_MLP_PATH=.cache/phi3_mini_4k_128k_pretrain/mlp2x_gelu_clip_l14_336px/mm_projector.bin
+OUTPUT_DIR_PATH=results/videogpt_plus_finetune_wo_caption_baseline
 
-CUDA_VISIBLE_DEVICES=6 deepspeed --master_port 25400 videogpt_plus/train/train.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port 25400 videogpt_plus/train/train_baseline.py \
 --lora_enable True --lora_r 128 --lora_alpha 256 --mm_projector_lr 2e-5 \
 --deepspeed scripts/zero3.json \
 --model_name_or_path "$BASE_LLM_PATH" \
 --version phi3_instruct \
---dataset_use FINETUNING \
---data_path playground/Moment-10M_0_train.json \
---image_folder playground/data \
---use_caption False \
+--dataset_use STAGE2 \
 --vision_tower "$VISION_TOWER" \
 --image_vision_tower "$IMAGE_VISION_TOWER" \
 --mm_projector_type "$PROJECTOR_TYPE" \
@@ -38,7 +35,7 @@ CUDA_VISIBLE_DEVICES=6 deepspeed --master_port 25400 videogpt_plus/train/train.p
 --per_device_eval_batch_size 4 \
 --gradient_accumulation_steps 4 \
 --evaluation_strategy "no" \
---save_strategy "steps" \
+--save_strategy "no" \
 --save_steps 50000 \
 --save_total_limit 1 \
 --learning_rate 2e-4 \
@@ -47,8 +44,8 @@ CUDA_VISIBLE_DEVICES=6 deepspeed --master_port 25400 videogpt_plus/train/train.p
 --lr_scheduler_type "cosine" \
 --logging_steps 1 \
 --tf32 True \
---model_max_length 4096 \
+--model_max_length 131072 \
 --gradient_checkpointing True \
 --dataloader_num_workers 4 \
 --lazy_preprocess True \
---report_to none
+--report_to tensorboard

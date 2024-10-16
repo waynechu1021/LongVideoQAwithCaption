@@ -45,6 +45,13 @@ mvbench_data_list = {
 
 def eval_model(args):
     # Model
+    import random
+    import numpy as np
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
+    torch.cuda.manual_seed_all(42)
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(args.model_path)
@@ -75,12 +82,17 @@ def eval_model(args):
                                  video_processor, mvbench_data_list)
     # distributed_sampler = DistributedSampler(dataset, rank=args.rank, shuffle=False)
     # dataloader = DataLoader(dataset, batch_size=args.batch_size_per_gpu, num_workers=4, sampler=distributed_sampler)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size_per_gpu, num_workers=0, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size_per_gpu, num_workers=4, shuffle=True)
 
     for (idx, sample_set, video_frames, context_frames, slice_len) in tqdm(dataloader):
         idx, sample_set, video_frames, context_frames, slice_len = int(idx[0]), sample_set[
             0], video_frames, context_frames, int(slice_len[0])
-        if video_frames is None:
+        #FIXME  there is a bug for some sample that can not sample 16 frames and is padded to 16 frames 
+        slice_len = len(video_frames)
+        video_json_name = sample_set['video_name'][0].replace('/', '_')
+        if len(video_json_name) > 100:
+            video_json_name = video_json_name[50:]
+        if os.path.exists(f"{args.output_dir}/{video_json_name}_{idx}.json"):
             continue
         sample = sample_set
         qs = sample['Q'][0]
