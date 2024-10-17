@@ -3,4 +3,5 @@ playground/
 .vscode/
 results/
 scripts/
+videogpt_plus/config/dataset_config.py
 **/__pycache__

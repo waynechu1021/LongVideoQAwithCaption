@@ -91,7 +91,7 @@ git clone https://github.com/mbzuai-oryx/VideoGPT-plus
 cd VideoGPT-plus
 
 pip install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu118
-pip install transformers==4.41.0
+pip install transformers==4.44.1
 
 pip install -r requirements.txt
 

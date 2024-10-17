@@ -56,9 +56,10 @@ def eval_model(args):
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(args.model_path)
     tokenizer, model, image_processor, context_len = load_pretrained_model(model_path, args.model_base, model_name)
-    mamba_tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model.config.mm_mamba,
-            padding_side="right")
+    if getattr(model.config,'mm_mamba',None) is not None:
+        mamba_tokenizer = transformers.AutoTokenizer.from_pretrained(
+                model.config.mm_mamba,
+                padding_side="right")
     model.config.stage = 2
     mm_use_im_start_end = getattr(model.config, "mm_use_im_start_end", False)
     mm_use_im_patch_token = getattr(model.config, "mm_use_im_patch_token", True)
@@ -112,13 +113,15 @@ def eval_model(args):
             input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX,
                                               return_tensors='pt').unsqueeze(0).cuda()
             
-            conv_mamba = conv_templates['mamba'].copy()
-            conv_mamba.append_message(conv_mamba.roles[0], qs)
-            conv_mamba.append_message(conv_mamba.roles[1], None)
-            prompt = conv_mamba.get_prompt()
+            input_ids_mamba = None
+            if getattr(model.config,'mm_mamba',None) is not None:
+                conv_mamba = conv_templates['mamba'].copy()
+                conv_mamba.append_message(conv_mamba.roles[0], qs)
+                conv_mamba.append_message(conv_mamba.roles[1], None)
+                prompt = conv_mamba.get_prompt()
 
-            input_ids_mamba = tokenizer_image_token(prompt, mamba_tokenizer, IMAGE_TOKEN_INDEX,
-                                              return_tensors='pt').unsqueeze(0).cuda()
+                input_ids_mamba = tokenizer_image_token(prompt, mamba_tokenizer, IMAGE_TOKEN_INDEX,
+                                                return_tensors='pt').unsqueeze(0).cuda()
 
             # stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
             stop_str = "<|end|>"
