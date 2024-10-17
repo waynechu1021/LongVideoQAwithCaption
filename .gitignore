@@ -4,4 +4,5 @@ playground/
 results/
 scripts/
 videogpt_plus/config/dataset_config.py
+test.ipynb
 **/__pycache__
