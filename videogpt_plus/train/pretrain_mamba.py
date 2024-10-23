@@ -50,6 +50,7 @@ class ModelArguments:
     version: Optional[str] = field(default="phi3_instruct")
     freeze_backbone: bool = field(default=False)
     tune_mm_mlp_adapter: bool = field(default=False)
+    tune_image_mm_mlp_adapter: bool = field(default=False)
     vision_tower: Optional[str] = field(default=None)
     image_vision_tower: Optional[str] = field(default=None)
     mm_vision_select_layer: Optional[int] = field(default=-1)  # default to the last layer
@@ -63,13 +64,6 @@ class ModelArguments:
     image_mm_projector_type: Optional[str] = field(default='mlp2x_gelu')
     mm_use_box_start_end: bool = field(default=False)
 
-    pretrained_tor_module: Optional[str] = field(default=None)
-    pretrained_vision_proj_mamba: Optional[str] = field(default=None)
-    pretrained_image_vision_proj_mamba: Optional[str] = field(default=None)
-    pretrain_mamba_module: Optional[str] = field(default=None)
-    mamba_name_or_path: Optional[str] = field(default=None)
-    max_num_of_tor: Optional[int] = field(default=None)
-
 
 @dataclass
 class DataArguments:
@@ -79,7 +73,6 @@ class DataArguments:
     image_grid_pinpoints: Optional[str] = field(default=None)
 
     dataset_use: str = field(default="FINETUNING")
-    use_caption: bool = False
 
 
 @dataclass
@@ -118,7 +111,7 @@ class TrainingArguments(transformers.TrainingArguments):
     group_by_modality_length: bool = field(default=False)
 
     seed = 42
-    stage:int = 1
+
 
 class LogCallback(TrainerCallback):
     def __init__(self, logging):
@@ -199,41 +192,12 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer,
                                    output_dir: str):
     """Collects the state dict and dump to disk."""
 
-    # if getattr(trainer.args, "tune_mm_mlp_adapter", False):
-    #     # Only save Adapter
-    #     keys_to_match = ['mm_projector', "ctm", "block"]
-    #     if getattr(trainer.args, "use_im_start_end", False):
-    #         keys_to_match.extend(['embed_tokens', 'embed_in'])
+    if getattr(trainer.args, "tune_mm_mlp_adapter", False):
+        # Only save Adapter
+        keys_to_match = ['mm_projector']
+        if getattr(trainer.args, "use_im_start_end", False):
+            keys_to_match.extend(['embed_tokens', 'embed_in'])
 
-    #     weight_to_save = get_mm_adapter_state_maybe_zero_3(trainer.model.named_parameters(), keys_to_match)
-    #     trainer.model.config.save_pretrained(output_dir)
-
-    #     current_folder = output_dir.split('/')[-1]
-    #     parent_folder = os.path.dirname(output_dir)
-    #     if trainer.args.local_rank == 0 or trainer.args.local_rank == -1:
-    #         if current_folder.startswith('checkpoint-'):
-    #             mm_projector_folder = os.path.join(parent_folder, "mm_projector")
-    #             os.makedirs(mm_projector_folder, exist_ok=True)
-    #             torch.save(weight_to_save, os.path.join(mm_projector_folder, f'{current_folder}.bin'))
-    #         else:
-    #             torch.save(weight_to_save, os.path.join(output_dir, f'mm_projector.bin'))
-
-    if trainer.args.stage == 1:
-        keys_to_match = ['mamba']
-        weight_to_save = get_mm_adapter_state_maybe_zero_3(trainer.model.named_parameters(), keys_to_match)
-        trainer.model.get_model().mamba.config.save_pretrained(output_dir)
-
-        current_folder = output_dir.split('/')[-1]
-        parent_folder = os.path.dirname(output_dir)
-        if trainer.args.local_rank == 0 or trainer.args.local_rank == -1:
-            if current_folder.startswith('checkpoint-'):
-                mm_projector_folder = os.path.join(parent_folder, "mamba_module")
-                os.makedirs(mm_projector_folder, exist_ok=True)
-                torch.save(weight_to_save, os.path.join(mm_projector_folder, f'{current_folder}.bin'))
-            else:
-                torch.save(weight_to_save, os.path.join(output_dir, f'mamba_module.bin'))
-        
-        keys_to_match = ["tor_embedding", "tor_projector", "vision_projector", "image_vision_projector"]
         weight_to_save = get_mm_adapter_state_maybe_zero_3(trainer.model.named_parameters(), keys_to_match)
         trainer.model.config.save_pretrained(output_dir)
 
@@ -241,13 +205,34 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer,
         parent_folder = os.path.dirname(output_dir)
         if trainer.args.local_rank == 0 or trainer.args.local_rank == -1:
             if current_folder.startswith('checkpoint-'):
-                mm_projector_folder = os.path.join(parent_folder, "tor_and_projector_module")
+                mm_projector_folder = os.path.join(parent_folder, "mm_projector")
                 os.makedirs(mm_projector_folder, exist_ok=True)
                 torch.save(weight_to_save, os.path.join(mm_projector_folder, f'{current_folder}.bin'))
             else:
-                torch.save(weight_to_save, os.path.join(output_dir, f'tor_and_projector_module.bin'))
-        return
+                torch.save(weight_to_save, os.path.join(output_dir, f'mm_projector.bin'))
 
+    if getattr(trainer.args, "tune_image_mm_mlp_adapter", False):
+        # Only save Adapter
+        keys_to_match = ['image_mm_projector']
+        if getattr(trainer.args, "use_im_start_end", False):
+            keys_to_match.extend(['embed_tokens', 'embed_in'])
+
+        weight_to_save = get_mm_adapter_state_maybe_zero_3(trainer.model.named_parameters(), keys_to_match)
+        trainer.model.config.save_pretrained(output_dir)
+
+        current_folder = output_dir.split('/')[-1]
+        parent_folder = os.path.dirname(output_dir)
+        if trainer.args.local_rank == 0 or trainer.args.local_rank == -1:
+            if current_folder.startswith('checkpoint-'):
+                mm_projector_folder = os.path.join(parent_folder, "mm_projector")
+                os.makedirs(mm_projector_folder, exist_ok=True)
+                torch.save(weight_to_save, os.path.join(mm_projector_folder, f'{current_folder}.bin'))
+            else:
+                torch.save(weight_to_save, os.path.join(output_dir, f'mm_projector.bin'))
+
+    if getattr(trainer.args, "tune_mm_mlp_adapter", False) or getattr(trainer.args, "tune_image_mm_mlp_adapter", False):
+        return 
+    
     if trainer.deepspeed:
         torch.cuda.synchronize()
         trainer.save_model(output_dir)
@@ -349,13 +334,13 @@ def _add_speaker_and_signal(header, source, get_conversation=True):
 
 def preprocess_multimodal(
         sources: Sequence[str],
-        data_args: DataArguments,
+        data_args: DataArguments
 ) -> Dict:
     is_multimodal = data_args.is_multimodal
     if not is_multimodal:
         return sources
 
-    for i, source in enumerate(sources):
+    for source in sources:
         for sentence in source:
             if DEFAULT_IMAGE_TOKEN in sentence['value'] or DEFAULT_VIDEO_TOKEN in sentence['value']:
                 if sentence['value'].endswith(DEFAULT_IMAGE_TOKEN):
@@ -384,15 +369,7 @@ def preprocess_multimodal(
             if data_args.mm_use_im_start_end:
                 replace_token = DEFAULT_IM_START_TOKEN + replace_token + DEFAULT_IM_END_TOKEN
                 vid_replace_token = DEFAULT_VID_START_TOKEN + vid_replace_token + DEFAULT_VID_END_TOKEN
-            if data_args.use_caption and sentence['from'] == 'gpt':
-                dense_caption = ''
-                cap = sentence['value']
-                for item in cap:
-                    dense_caption += DEFAULT_TOR_TOKRN + '\n'
-                    dense_caption += str(round(item['moment'][0],2)) + '-' + str(round(item['moment'][1],2))
-                    dense_caption += ' '
-                    dense_caption += item['content']
-                sentence['value'] = dense_caption
+
             sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, replace_token)
             sentence['value'] = sentence['value'].replace(DEFAULT_VIDEO_TOKEN, vid_replace_token)
 
@@ -573,97 +550,6 @@ def preprocess_phi3(
         labels=targets,
     )
 
-def preprocess_mamba(
-    sources,
-    tokenizer: transformers.PreTrainedTokenizer,
-    has_image: bool = False
-) -> Dict:
-    conv = conversation_lib.conv_mamba.copy()
-    roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
-
-    # Apply prompt templates
-    conversations = []
-    for i, source in enumerate(sources):
-        if roles[source[0]["from"]] != conv.roles[0]:
-            # Skip the first one if it is not from human
-            source = source[1:]
-
-        conv.messages = []
-        for j, sentence in enumerate(source):
-            role = roles[sentence["from"]]
-            assert role == conv.roles[j % 2], f"{i}"
-            conv.append_message(role, sentence["value"])
-        conversations.append(conv.get_prompt())
-
-    # Tokenize conversations
-
-    if has_image:
-        input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors='pt') for prompt in conversations], dim=0)
-    else:
-        input_ids = tokenizer(
-            conversations,
-            return_tensors="pt",
-            padding="longest",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-        ).input_ids
-
-    targets = input_ids.clone()
-
-    assert conv.sep_style == conversation_lib.SeparatorStyle.TWO
-
-    # Mask targets
-    sep = conv.sep + conv.roles[1] + ": "
-    for conversation, target in zip(conversations, targets):
-        total_len = int(target.ne(tokenizer.pad_token_id).sum())
-
-        rounds = conversation.split(conv.sep2)
-        cur_len = 0
-        # target[:cur_len] = IGNORE_INDEX
-        for i, rou in enumerate(rounds):
-            if rou == "":
-                break
-
-            parts = rou.split(sep)
-            if len(parts) != 2:
-                break
-            parts[0] += sep
-
-            if has_image:
-                round_len = len(tokenizer_image_token(rou, tokenizer)) + 1
-                instruction_len = len(tokenizer_image_token(parts[0], tokenizer)) - 1
-            else:
-                round_len = len(tokenizer(rou).input_ids)
-                instruction_len = len(tokenizer(parts[0]).input_ids) - 1
-
-
-            target[cur_len : cur_len + instruction_len] = IGNORE_INDEX
-
-            cur_len += round_len
-        target[cur_len:] = IGNORE_INDEX
-
-    return dict(
-        input_ids=input_ids,
-        labels=targets,
-    )
-
-def preprocess_meteor(
-        sources,
-        tokenizer: transformers.PreTrainedTokenizer,
-        mamba_tokenizer: transformers.PreTrainedTokenizer,
-        has_image: bool = False,
-        stage = 1
-) -> Dict:
-    phi3_dict = preprocess_phi3(sources,tokenizer,has_image)
-    mamba_dict = preprocess_mamba(sources, mamba_tokenizer, has_image)
-
-    tmp = phi3_dict['labels'][phi3_dict['labels']!=TOR_TOKEN_INDEX]
-    return dict(
-        input_ids_mamba=mamba_dict['input_ids'],
-        input_ids = phi3_dict['labels'][phi3_dict['labels']>=0].unsqueeze(0) if stage == 1 else phi3_dict['input_ids'],
-        labels = tmp[tmp>=0].unsqueeze(0) if stage == 1 else phi3_dict['labels'],
-    )
-
 
 def preprocess_plain(
         sources: Sequence[str],
@@ -690,9 +576,7 @@ def preprocess_plain(
 def preprocess(
         sources: Sequence[str],
         tokenizer: transformers.PreTrainedTokenizer,
-        mamba_tokenizer: transformers.PreTrainedTokenizer,
-        has_image: bool = False,
-        stage = 1,
+        has_image: bool = False
 ) -> Dict:
     """
     Given a list of sources, each is a conversation list. This transform:
@@ -706,7 +590,7 @@ def preprocess(
     if conversation_lib.default_conversation.version.startswith("v1"):
         return preprocess_v1(sources, tokenizer, has_image=has_image)
     if conversation_lib.default_conversation.version == "phi3":
-        return preprocess_meteor(sources, tokenizer, mamba_tokenizer, has_image=has_image, stage = stage)
+        return preprocess_phi3(sources, tokenizer, has_image=has_image)
     # add end signal and concatenate together
     conversations = []
     for source in sources:
@@ -740,14 +624,13 @@ class LazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
     def __init__(self, tokenizer: transformers.PreTrainedTokenizer,
-                 mamba_tokenizer: transformers.PreTrainedTokenizer,
                  data_args: DataArguments):
         super(LazySupervisedDataset, self).__init__()
 
         dataset_list = DataConfig[str(data_args.dataset_use)]
         rank0_print(f"Loading datasets: {dataset_list}")
 
-        # # Read all the datasets and populate list_data_dict
+        # Read all the datasets and populate list_data_dict
         list_data_dict = []
         for data in dataset_list:
             annotations = json.load(open(data["annotation_path"], "r"))
@@ -760,26 +643,26 @@ class LazySupervisedDataset(Dataset):
 
         # Populate the class variables
         self.tokenizer = tokenizer
-        self.mamba_tokenizer = mamba_tokenizer
         self.list_data_dict = list_data_dict
         self.data_args = data_args
 
     def __len__(self):
         return len(self.list_data_dict)
 
-    # @property
-    # def modality_lengths(self):
-    #     length_list = []
-    #     for sample in self.list_data_dict:
-    #         cur_len = sum(len(conv['value'].split()) for conv in sample['conversations'])
-    #         cur_len = cur_len if 'image' in sample else -cur_len
-    #         length_list.append(cur_len)
-    #     return length_list
+    @property
+    def modality_lengths(self):
+        length_list = []
+        for sample in self.list_data_dict:
+            cur_len = sum(len(conv['value'].split()) for conv in sample['conversations'])
+            cur_len = cur_len if 'image' in sample else -cur_len
+            length_list.append(cur_len)
+        return length_list
 
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         sources = self.list_data_dict[i]
         if 'image' in sources:
             image_folder = sources['data_path']
+            # image_folder = self.data_args.image_folder
             image_file = sources['image']
 
             image = Image.open(os.path.join(image_folder, image_file.replace("\\", "/"))).convert('RGB')
@@ -809,62 +692,28 @@ class LazySupervisedDataset(Dataset):
                 image = video_processor.preprocess([np.array(image)], use_image=True)['pixel_values'][0]
 
             sources = preprocess_multimodal(
-                copy.deepcopy([e["conversations"] for e in sources]),
+                copy.deepcopy([e["conversations"] for e in [sources]]),
                 self.data_args)
             data_dict = preprocess(
                 sources,
                 self.tokenizer,
-                self.mamba_tokenizer, 
-                has_image=True, 
-                stage = self.data_args.stage
-                )
+                has_image=True)
 
         elif "video" in sources:
-            video_folder = sources['data_path']
-            video_file = sources['video']
-            video_file_path = os.path.join(video_folder, video_file)
-            try:
-                # Note that currently only DUAL Encoder configuration is supported,
-                # so both image and video processor should not be None
-                image_processor = self.data_args.image_processor
-                video_processor = self.data_args.video_processor
-                frames, context_images = _get_rawvideo_dec(video_file_path, image_processor, video_processor,
-                                                           frame_resolution=224, max_frames=NUM_FRAMES,
-                                                           num_video_frames=NUM_FRAMES,
-                                                           num_context_images=NUM_CONTEXT_IMAGES)
-                sources = preprocess_multimodal(
-                    copy.deepcopy([e["conversations"] for e in [sources]]),
-                    self.data_args)
-                data_dict = preprocess(
-                    sources,
-                    self.tokenizer,
-                    self.mamba_tokenizer, 
-                    has_image=True,
-                    stage = self.data_args.stage)
-            except Exception as e:
-                print(f"Caught exception {e} when loading video {video_file_path}. Sampling a random video.")
-                index = np.random.randint(0, len(self))
-                return self.__getitem__(index)
-
+            raise NotImplementedError
         else:
-            sources = copy.deepcopy([e["conversations"] for e in sources])
+            sources = copy.deepcopy([e["conversations"] for e in [sources]])
             data_dict = preprocess(
                 sources,
                 self.tokenizer,
-                self.mamba_tokenizer, 
-                has_image=False,
-                stage = self.data_args.stage)
+                has_image=False)
 
         if isinstance(i, int):
-            data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0], input_ids_mamba = data_dict["input_ids_mamba"][0])
+            data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
 
         # Image exists in the data
         if 'image' in self.list_data_dict[i]:
             data_dict['image'] = image
-            data_dict['context_image'] = None
-        elif 'video' in self.list_data_dict[i]:
-            data_dict['image'] = frames
-            data_dict['context_image'] = context_images
         elif self.data_args.is_multimodal:
             # image does not exist in the data, but the model is multimodal
             crop_size = self.data_args.image_processor.crop_size
@@ -878,37 +727,27 @@ class DataCollatorForSupervisedDataset(object):
     """Collate examples for supervised fine-tuning."""
 
     tokenizer: transformers.PreTrainedTokenizer
-    mamba_tokenizer: transformers.PreTrainedTokenizer
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         input_ids, labels = tuple([instance[key] for instance in instances]
                                   for key in ("input_ids", "labels"))
-        input_ids_mamba = [instance['input_ids_mamba'] for instance in instances]
         input_ids = torch.nn.utils.rnn.pad_sequence(
             input_ids,
             batch_first=True,
             padding_value=self.tokenizer.pad_token_id)
-        input_ids_mamba = torch.nn.utils.rnn.pad_sequence(
-            input_ids_mamba,
-            batch_first=True,
-            padding_value=self.mamba_tokenizer.pad_token_id)
         labels = torch.nn.utils.rnn.pad_sequence(labels,
                                                  batch_first=True,
                                                  padding_value=IGNORE_INDEX)
         input_ids = input_ids[:, :self.tokenizer.model_max_length]
-        input_ids_mamba = input_ids_mamba[:, :self.tokenizer.model_max_length]
         labels = labels[:, :self.tokenizer.model_max_length]
         batch = dict(
             input_ids=input_ids,
-            input_ids_mamba=input_ids_mamba,
             labels=labels,
             attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
-            attention_mask_mamba=input_ids_mamba.ne(self.mamba_tokenizer.pad_token_id),
         )
 
-        if 'image' in instances[0]:  # Alternatively if 'context_image' in instances[0]
+        if 'image' in instances[0]:
             images = [instance['image'] for instance in instances]
-            context_images = [instance['context_image'] for instance in instances]
 
             new_images = []
             for image in images:
@@ -919,31 +758,19 @@ class DataCollatorForSupervisedDataset(object):
                     new_images.append(image)
             images = new_images
 
-            new_context_images = []
-            for image in context_images:
-                if type(image) is list:
-                    for i in image:
-                        new_context_images.append(i)
-                else:
-                    new_context_images.append(image)
-            context_images = new_context_images
-
             if all(x is not None and x.shape == images[0].shape for x in images):
                 batch['images'] = torch.stack(images)
-                batch['context_images'] = torch.stack(context_images)
             else:
                 batch['images'] = images
-                batch['context_images'] = context_images
 
         return batch
 
 
 def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
-                                mamba_tokenizer: transformers.PreTrainedTokenizer,
                                 data_args) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    train_dataset = LazySupervisedDataset(tokenizer=tokenizer, mamba_tokenizer=mamba_tokenizer, data_args=data_args)
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer, mamba_tokenizer = mamba_tokenizer)
+    train_dataset = LazySupervisedDataset(tokenizer=tokenizer, data_args=data_args)
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     return dict(train_dataset=train_dataset,
                 eval_dataset=None,
                 data_collator=data_collator)
@@ -1007,11 +834,9 @@ def train():
     if model_args.vision_tower is not None:
         model_args.vision_tower = f"{model_args.vision_tower}/InternVideo2-stage2_1b-224p-f4.pt"
 
-    model = VideoGPTPlusPhi3ForCausalLM.from_pretrained(
+    model = VideoGPTPlusMambaForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
-        attn_implementation="flash_attention_2",
-        torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
         **bnb_model_from_pretrained_args
     )
     model.config.use_cache = False
@@ -1089,22 +914,25 @@ def train():
     model.config.image_grid_pinpoints = data_args.image_grid_pinpoints
 
     model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
+    model.config.tune_image_mm_mlp_adapter = training_args.tune_image_mm_mlp_adapter = model_args.tune_image_mm_mlp_adapter
     if model_args.tune_mm_mlp_adapter:
         model.requires_grad_(False)
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = True
+    if model_args.tune_image_mm_mlp_adapter:
+        model.requires_grad_(False)
         for p in model.get_model().image_mm_projector.parameters():
             p.requires_grad = True
 
+    # The below configuration is not used or fully supported.
     model.config.freeze_mm_mlp_adapter = training_args.freeze_mm_mlp_adapter
     if training_args.freeze_mm_mlp_adapter:
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
         for p in model.get_model().image_mm_projector.parameters():
             p.requires_grad = False
-    print('projector grad enable = ',all(p.requires_grad for p in model.get_model().image_mm_projector.parameters()))
-    print('mm_projector grad enable = ',all(p.requires_grad for p in model.get_model().mm_projector.parameters()))
-    if training_args.bits in [4, 8]:
+
+    if training_args.bits in [4, 8]:  # This configuration is not used or fully supported.
         model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
         model.get_model().image_mm_projector.to(dtype=compute_dtype, device=training_args.device)
 
@@ -1117,7 +945,6 @@ def train():
     training_args.use_im_start_end = model_args.mm_use_box_start_end
 
     model.config.mm_use_im_patch_token = model_args.mm_use_im_patch_token
-    model_args.use_caption = data_args.use_caption
     model.initialize_vision_tokenizer(model_args, tokenizer=tokenizer)
 
     # Freeze the vision towers (I know they are already frozen, but let's just do it anyway, maybe helpful in case someone wants to finetune it!)
@@ -1127,42 +954,12 @@ def train():
     if model_args.image_vision_tower is not None:
         for p in model.get_image_vision_tower().parameters():
             p.requires_grad = False
-    mamba_tokenizer = None
-    if model_args.mamba_name_or_path is not None:
-        mamba_tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.mamba_name_or_path,
-            cache_dir=training_args.cache_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right")
-        mamba_tokenizer.add_tokens([DEFAULT_TOR_TOKRN],special_tokens=True)
-        model.config.stage = data_args.stage = training_args.stage
-        if model.config.stage == 1:
-            model.requires_grad_(False)
-        model.get_model().initialize_mamba_and_tor_modules(model_args)
-        for p in model.get_model().mamba.parameters():
-            p.requires_grad = True
-        for p in model.get_model().tor_projector.parameters():
-            p.requires_grad = True
-        for p in model.get_model().vision_projector.parameters():
-            p.requires_grad = True
-        for p in model.get_model().image_vision_projector.parameters():
-            p.requires_grad = True
-        for p in model.get_model().mm_projector.parameters():
-            p.requires_grad = True
-        for p in model.get_model().image_mm_projector.parameters():
-            p.requires_grad = True
-        model.get_model().tor_embedding.requires_grad = True
-    trainable_params = []
-    for k,v in model.named_parameters():
-        if v.requires_grad:
-            trainable_params.append(k)
-    logging.info(f'trainable_params = {trainable_params}')
-    print(f'trainable_params = {trainable_params}')
+
     # Calculate total parameters and trainable parameters
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    print(f"Total parameters: {total_params}")  # FIXME: Sometimes it shows wrong total params, not sure why
+    print(f"Total parameters: {total_params}")  # Fixme: Sometimes it shows wrong total params, not sure why
     print(f"Trainable parameters: {trainable_params}")
 
     if training_args.bits in [4, 8]:
@@ -1178,15 +975,9 @@ def train():
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
 
-    data_module = make_supervised_data_module(tokenizer=tokenizer, mamba_tokenizer=mamba_tokenizer, data_args=data_args)
-    print(f"Total training samples :{len(data_module['train_dataset'])}")
-
+    data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
     log_callback = LogCallback(logging)
-    trainer = VideoGPTPlusTrainer(model=model, 
-                                tokenizer=tokenizer,
-                                args=training_args,
-                                callbacks=[log_callback],
-                                **data_module)
+    trainer = VideoGPTPlusTrainer(model=model, tokenizer=tokenizer, args=training_args, **data_module, callbacks=[log_callback],)
 
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         trainer.train(resume_from_checkpoint=True)

@@ -103,7 +103,9 @@ class MetaModel:
             logging.info(f'load image_mm_projector {msg}')
 
     def initialize_tor_modules(self,model_args):
-        pretrained_tor_and_projector_module = model_args.pretrained_tor_and_projector_module
+        pretrained_tor_module = model_args.pretrained_tor_module
+        pretrained_vision_proj_mamba = model_args.pretrained_vision_proj_mamba
+        pretrained_image_vision_proj_mamba = model_args.pretrained_image_vision_proj_mamba
         mamba_hidden_size = self.mamba.config.hidden_size 
         self.max_num_of_tor = getattr(model_args,'max_num_of_tor',None)
         if self.max_num_of_tor is not None:
@@ -113,9 +115,9 @@ class MetaModel:
             torch.nn.GELU(),
             torch.nn.Linear(self.config.hidden_size,self.config.hidden_size),
         )
-        if pretrained_tor_and_projector_module is not None:
-            logging.info(f"Initializing tor projector from {pretrained_tor_and_projector_module}")
-            tor_and_projector_module_weights = torch.load(pretrained_tor_and_projector_module, map_location='cpu')
+        if pretrained_tor_module is not None:
+            logging.info(f"Initializing tor projector from {pretrained_tor_module}")
+            tor_module_weights = torch.load(pretrained_tor_module, map_location='cpu')
 
             def get_w(weights, keyword, ignore_keyword=None):
                 if ignore_keyword is None:
@@ -123,26 +125,39 @@ class MetaModel:
                 else:
                     return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k and ignore_keyword not in k}
 
-            msg = self.tor_projector.load_state_dict(get_w(tor_and_projector_module_weights, 'tor_projector'))
+            msg = self.tor_projector.load_state_dict(get_w(tor_module_weights, 'tor_projector'))
             logging.info(f'load tor_projector {msg}')
-
-            logging.info(f"Initializing image_vision_projector from {pretrained_tor_and_projector_module}")
-            self.image_vision_projector.load_state_dict(get_w(tor_and_projector_module_weights, 'image_vision_projector'))
-            logging.info(f'load image_vision_projector {msg}')
-            
-            logging.info(f"Initializing vision_projector from {pretrained_tor_and_projector_module}")
-            self.vision_projector.load_state_dict(get_w(tor_and_projector_module_weights, 'vision_projector','image_vision_projector'))
-            logging.info(f'load vision_projector {msg}')
-    
-            logging.info(f"Initializing tor embedding from {pretrained_tor_and_projector_module}")
 
             def get_w(weights, keyword):
                 return {k.split(keyword)[1]+keyword: v for k, v in weights.items() if keyword in k}
 
-            self.tor_embedding = torch.nn.Parameter(get_w(tor_and_projector_module_weights, 'tor_embedding')['tor_embedding'])
+            logging.info(f"Initializing tor embedding from {pretrained_tor_module}")
+            self.tor_embedding = torch.nn.Parameter(get_w(tor_module_weights, 'tor_embedding')['tor_embedding'])
             logging.info('load tor_embedding successfully')
         else:
             self.tor_embedding = torch.nn.Parameter(torch.randn(100, mamba_hidden_size))
+        if pretrained_vision_proj_mamba is not None:
+            vision_proj_mamba_weights = torch.load(pretrained_vision_proj_mamba, map_location='cpu')
+            def get_w(weights, keyword, ignore_keyword=None):
+                if ignore_keyword is None:
+                    return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
+                else:
+                    return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k and ignore_keyword not in k}
+            logging.info(f"Initializing vision_projector from {pretrained_vision_proj_mamba}")
+            msg = self.vision_projector.load_state_dict(get_w(vision_proj_mamba_weights, 'mm_projector'))
+            logging.info(f'load vision_projector {msg}')
+        if pretrained_image_vision_proj_mamba is not None:
+            image_vision_proj_weights = torch.load(pretrained_image_vision_proj_mamba, map_location='cpu')
+            def get_w(weights, keyword, ignore_keyword=None):
+                if ignore_keyword is None:
+                    return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
+                else:
+                    return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k and ignore_keyword not in k}
+            logging.info(f"Initializing image_vision_projector from {pretrained_image_vision_proj_mamba}")
+            msg = self.image_vision_projector.load_state_dict(get_w(image_vision_proj_weights, 'mm_projector'))
+            logging.info(f'load image_vision_projector {msg}')
+    
+            
 
     def initialize_mamba_and_tor_modules(self,model_args):
         if model_args.mamba_name_or_path is not None:
@@ -266,9 +281,9 @@ class VideoGPTPlusMetaForCausalLM(ABC):
         video_encoder = self.get_model().get_vision_tower()
 
         if image_encoder is not None:
-            context_features = self.get_model().image_mm_projector(context_features)
+            context_features = self.get_model().image_mm_projector(context_features.to(torch.bfloat16))
         elif video_encoder is not None:
-            context_features = self.get_model().mm_projector(context_features)
+            context_features = self.get_model().mm_projector(context_features.to(torch.bfloat16))
         else:
             raise NotImplementedError("Either image_encoder or video_encoder should not be None.")
 

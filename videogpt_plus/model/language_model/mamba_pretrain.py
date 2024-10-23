@@ -1,10 +1,12 @@
 # Transformers
 import re
 import torch
-from torch import nn
-from typing import Optional, Tuple, Union
-from transformers import MambaForCausalLM, MambaConfig
-from transformers.models.mamba.modeling_mamba import MambaOutput
+import torch.nn as nn
+from torch.nn import CrossEntropyLoss
+from typing import Optional, Tuple, Union, List
+from transformers import MambaForCausalLM, MambaConfig, MambaModel
+from transformers.models.mamba.modeling_mamba import MambaCausalLMOutput
+from videogpt_plus.model.arch import MetaModel, VideoGPTPlusMetaForCausalLM
 
 
 class MambaCache:
@@ -24,29 +26,50 @@ class MambaCache:
             for i in range(config.num_hidden_layers)
         }
 
-# Dataclass & ModelOutput
-from dataclasses import dataclass
-from transformers.modeling_outputs import ModelOutput
+class VideoGPTPlusMambaConfig(MambaConfig):
+    model_type = "VideoGPT+4mamba"
 
-class MeteorMambaForCausalLM(MambaForCausalLM):
+
+class VideoGPTPlusMambaModel(MetaModel, MambaModel):
+    config_class = VideoGPTPlusMambaConfig
+
+    def __init__(self, config: MambaConfig):
+        super(VideoGPTPlusMambaModel, self).__init__(config)
+
+class VideoGPTPlusMambaForCausalLM(MambaForCausalLM,VideoGPTPlusMetaForCausalLM):
+    config_class = VideoGPTPlusMambaConfig
     def __init__(self, config):
-        super().__init__(config)
+        super(MambaForCausalLM, self).__init__(config)
+        self.backbone = VideoGPTPlusMambaModel(config)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.post_init()
 
+    def get_model(self):
+        return self.backbone
+    
     def forward(
         self,
+        input_ids: torch.LongTensor = None,
+        attention_mask: Optional[torch.Tensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
+        past_key_values: Optional[List[torch.FloatTensor]] = None,
         cache_params: Optional[MambaCache] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         use_cache: Optional[bool] = None,
+        labels: Optional[torch.LongTensor] = None,
+        images: Optional[torch.FloatTensor] = None,
+        context_images: Optional[torch.FloatTensor] = None,
         **kwargs,  # for now we need this for generation
-    ) -> Union[Tuple, MambaOutput]:
+    ) -> Union[Tuple, MambaCausalLMOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Labels for language modeling. Note that the labels **are shifted** inside the model, i.e. you can set
             `labels = input_ids` Indices are selected in `[-100, 0, ..., config.vocab_size]` All labels set to `-100`
             are ignored (masked), the loss is only computed for labels in `[0, ..., config.vocab_size]`
         """
+        input_ids, attention_mask, past_key_values, inputs_embeds, labels = self.prepare_inputs_labels_for_multimodal(
+                input_ids, attention_mask, past_key_values, labels, images, context_images)
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         assert inputs_embeds is not None, "inputs_embeds should not be None for mamba"
 
@@ -59,11 +82,28 @@ class MeteorMambaForCausalLM(MambaForCausalLM):
         )
         hidden_states = mamba_outputs[0]
 
-        #logits = self.lm_head(hidden_states.to(self.lm_head.weight.dtype)).float()
+        logits = self.lm_head(hidden_states.to(self.lm_head.weight.dtype)).float()
 
-        return MambaOutput(
+        loss = None
+        if labels is not None:
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = CrossEntropyLoss()
+            shift_logits = shift_logits.view(-1, self.config.vocab_size)
+            shift_labels = shift_labels.view(-1)
+            # Enable videogpt_plus/pipeline parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
+
+        if not return_dict:
+            output = (logits,) + mamba_outputs[1:]
+            return (loss,) + output if loss is not None else output
+        return MambaCausalLMOutput(
+            loss = loss,
             cache_params=mamba_outputs.cache_params,
-            last_hidden_state=hidden_states,
+            logits=logits,
             hidden_states=mamba_outputs.hidden_states
         )
     
