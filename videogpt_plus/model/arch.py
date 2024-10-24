@@ -145,7 +145,7 @@ class MetaModel:
                 else:
                     return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k and ignore_keyword not in k}
             logging.info(f"Initializing vision_projector from {pretrained_vision_proj_mamba}")
-            msg = self.vision_projector.load_state_dict(get_w(vision_proj_mamba_weights, 'mm_projector'))
+            msg = self.vision_projector.load_state_dict(get_w(vision_proj_mamba_weights, 'vision_projector','image_vision_projector'))
             logging.info(f'load vision_projector {msg}')
         if pretrained_image_vision_proj_mamba is not None:
             image_vision_proj_weights = torch.load(pretrained_image_vision_proj_mamba, map_location='cpu')
@@ -155,7 +155,7 @@ class MetaModel:
                 else:
                     return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k and ignore_keyword not in k}
             logging.info(f"Initializing image_vision_projector from {pretrained_image_vision_proj_mamba}")
-            msg = self.image_vision_projector.load_state_dict(get_w(image_vision_proj_weights, 'mm_projector'))
+            msg = self.image_vision_projector.load_state_dict(get_w(image_vision_proj_weights, 'image_vision_projector'))
             logging.info(f'load image_vision_projector {msg}')
     
             
@@ -284,9 +284,15 @@ class VideoGPTPlusMetaForCausalLM(ABC):
         video_encoder = self.get_model().get_vision_tower()
 
         if image_encoder is not None:
-            context_features = self.get_model().image_mm_projector(context_features.to(torch.bfloat16))
+            if is_mamba:
+                context_features = self.get_model().image_vision_projector(context_features.to(torch.bfloat16))
+            else:
+                context_features = self.get_model().image_mm_projector(context_features.to(torch.bfloat16))
         elif video_encoder is not None:
-            context_features = self.get_model().mm_projector(context_features.to(torch.bfloat16))
+            if is_mamba:
+                context_features = self.get_model().vision_projector(context_features.to(torch.bfloat16))
+            else:
+                context_features = self.get_model().mm_projector(context_features.to(torch.bfloat16))
         else:
             raise NotImplementedError("Either image_encoder or video_encoder should not be None.")
 
