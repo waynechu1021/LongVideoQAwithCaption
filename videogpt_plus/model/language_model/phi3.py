@@ -102,13 +102,14 @@ class VideoGPTPlusPhi3ForCausalLM(Phi3ForCausalLM, VideoGPTPlusMetaForCausalLM):
                     # for i in range(inputs_embeds.shape[0]):
                     #     image_token_index = torch.where(input_ids[i]==self.config.image_token_index)
                     #     input_ids_llm_image = input_ids[i][image_token_index]
-                    #     inputs_embeds_llm_image = inputs_embeds_llm[i][image_token_index[0][-1]-16+3329:image_token_index[0][-1]-16+3329+self.get_model().max_num_of_tor]
+                    #     visual_token_length = NUM_FRAMES*int(16/self.config.visual_token_compression_rate)**2 + NUM_CONTEXT_IMAGES*int(24/self.config.visual_token_compression_rate)**2
+                    #     inputs_embeds_llm_image = inputs_embeds_llm[i][image_token_index[0][-1]-NUM_FRAMES+visual_token_length+1:image_token_index[0][-1]-NUM_FRAMES+visual_token_length+1+self.get_model().max_num_of_tor]
                     #     tor_embed = self.get_model().tor_projector(self.get_model().tor_embedding[:self.get_model().max_num_of_tor])
                     #     iftrue = torch.all(inputs_embeds_llm_image == tor_embed)
                     #     print(iftrue)
                     #     image_token_index = torch.where(input_ids_mamba[i]==self.config.image_token_index)
                     #     input_ids_image = input_ids_mamba[i][image_token_index]
-                    #     inputs_embeds_image = inputs_embeds[i][image_token_index[0][-1]-16+3329:image_token_index[0][-1]-16+3329+self.get_model().max_num_of_tor]
+                    #     inputs_embeds_image = inputs_embeds[i][image_token_index[0][-1]-NUM_FRAMES+visual_token_length+1:image_token_index[0][-1]-NUM_FRAMES+visual_token_length+1+self.get_model().max_num_of_tor]
                     #     tor_embed = self.get_model().tor_embedding[:self.get_model().max_num_of_tor]
                     #     iftrue = torch.all(inputs_embeds_image == tor_embed)
                     #     print(iftrue)
@@ -119,6 +120,15 @@ class VideoGPTPlusPhi3ForCausalLM(Phi3ForCausalLM, VideoGPTPlusMetaForCausalLM):
                     last_hidden_states = mamba_outputs.last_hidden_state.to(inputs_embeds_llm.dtype)
                     # the number of event is not always the same in a batch
                     inputs_embeds_llm = self.merge_input_embeds_with_tor_features(last_hidden_states,input_ids_mamba,input_ids,inputs_embeds_llm, stage=self.config.stage)
+                    # new_inputs_embed_llm = []
+                    # for i in range(inputs_embeds.shape[0]):
+                    #     image_token_index = torch.where(input_ids[i]==self.config.image_token_index)
+                    #     inputs_embeds_llm_before_image = inputs_embeds_llm[i][:image_token_index[0][0]]
+                    #     inputs_embeds_llm_after_image = inputs_embeds_llm[i][image_token_index[0][-1]-16+3329:]
+                    #     new_inputs_embed_llm.append(torch.cat([inputs_embeds_llm_before_image,inputs_embeds_llm_after_image],dim=0))
+                    # new_inputs_embed_llm = torch.stack(new_inputs_embed_llm,dim=0)
+                    # assert inputs_embeds_llm.shape[1] - new_inputs_embed_llm.shape[1] == 3328
+                    # inputs_embeds_llm = new_inputs_embed_llm
                 outputs = self.model(
                     input_ids=None if input_ids.shape[1] > 1 else input_ids,
                     attention_mask=attention_mask,

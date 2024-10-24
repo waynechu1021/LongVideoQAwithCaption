@@ -20,6 +20,7 @@ class MetaModel:
             self.mm_projector = build_vision_projector(config, image_mm_projector=False)
             self.image_mm_projector = build_vision_projector(config, image_mm_projector=True)
         if hasattr(config,'mm_mamba'):
+            print('building mm_mamba')
             self.mamba = MeteorMambaForCausalLM.from_pretrained(config.mm_mamba)
             del self.mamba.lm_head
             # self.mamba.resize_token_embeddings(32064)
@@ -254,15 +255,17 @@ class VideoGPTPlusMetaForCausalLM(ABC):
             else:
                 video_features = self.get_model().mm_projector(video_features.to(torch.bfloat16))
             video_features = rearrange(video_features, 'b (t l) d -> (b t) l d', t=4)  # t=4 - chunk size
-            video_features = apply_adaptive_avg_pooling(video_features, shape=(8, 8))  # Feature pooling from 256 to 64
+            feature_shape = int(16/self.config.visual_token_compression_rate)
+            video_features = apply_adaptive_avg_pooling(video_features, shape=(feature_shape, feature_shape))  # Feature pooling from 256 to 64
             video_features = rearrange(video_features, '(b t) l d -> b (t l) d', t=4)  # t=4 - chunk size
 
             if is_mamba:
                 context_image_features = self.get_model().image_vision_projector(context_features)
             else:
                 context_image_features = self.get_model().image_mm_projector(context_features)
+            feature_shape = int(24/self.config.visual_token_compression_rate)
             context_image_features = apply_adaptive_avg_pooling(context_image_features,
-                                                                shape=(12, 12))  # Feature pooling from 576 to 144
+                                                                shape=(feature_shape, feature_shape))  # Feature pooling from 576 to 144
             context_image_features = rearrange(context_image_features, '(b t) l d -> b (t l) d',
                                                b=video_features.shape[0])
 
@@ -996,10 +999,11 @@ class VideoGPTPlusMetaForCausalLM(ABC):
         elif stage == 2:
             for idx,cur_hidden_states in enumerate(hidden_states):
                 image_token_index = torch.where(input_ids[idx]==self.config.image_token_index)
-                cur_tor_embeddings = cur_hidden_states[image_token_index[0][-1]-16+3329:image_token_index[0][-1]-16+3329+self.get_model().max_num_of_tor]
+                visual_token_length = NUM_FRAMES*int(16/self.config.visual_token_compression_rate)**2 + NUM_CONTEXT_IMAGES*int(24/self.config.visual_token_compression_rate)**2
+                cur_tor_embeddings = cur_hidden_states[image_token_index[0][-1]-NUM_FRAMES+visual_token_length+1:image_token_index[0][-1]-NUM_FRAMES+visual_token_length+1+self.get_model().max_num_of_tor]
                 cur_tor_embeddings = self.get_model().tor_projector(cur_tor_embeddings)
                 image_token_index_llm = torch.where(input_ids_llm[idx]==self.config.image_token_index)
-                inputs_embeds_llm[idx][image_token_index_llm[0][-1]-16+3329:image_token_index_llm[0][-1]-16+3329+self.get_model().max_num_of_tor] = cur_tor_embeddings
+                inputs_embeds_llm[idx][image_token_index_llm[0][-1]-NUM_FRAMES+visual_token_length+1:image_token_index_llm[0][-1]-NUM_FRAMES+visual_token_length+1+self.get_model().max_num_of_tor] = cur_tor_embeddings
             return inputs_embeds_llm
         else:
             raise NotImplementedError

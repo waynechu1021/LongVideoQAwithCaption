@@ -69,6 +69,7 @@ class ModelArguments:
     pretrain_mamba_module: Optional[str] = field(default=None)
     mamba_name_or_path: Optional[str] = field(default=None)
     max_num_of_tor: Optional[int] = field(default=None)
+    visual_token_compression_rate: Optional[int] = field(default=2)
 
 
 @dataclass
@@ -1127,6 +1128,7 @@ def train():
     if model_args.image_vision_tower is not None:
         for p in model.get_image_vision_tower().parameters():
             p.requires_grad = False
+    model.config.visual_token_compression_rate = model_args.visual_token_compression_rate
     mamba_tokenizer = None
     if model_args.mamba_name_or_path is not None:
         mamba_tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -1138,6 +1140,11 @@ def train():
         model.config.stage = data_args.stage = training_args.stage
         if model.config.stage == 1:
             model.requires_grad_(False)
+        else:
+            for p in model.get_model().mm_projector.parameters():
+                p.requires_grad = True
+            for p in model.get_model().image_mm_projector.parameters():
+                p.requires_grad = True
         model.get_model().initialize_mamba_and_tor_modules(model_args)
         for p in model.get_model().mamba.parameters():
             p.requires_grad = True
@@ -1146,10 +1153,6 @@ def train():
         for p in model.get_model().vision_projector.parameters():
             p.requires_grad = True
         for p in model.get_model().image_vision_projector.parameters():
-            p.requires_grad = True
-        for p in model.get_model().mm_projector.parameters():
-            p.requires_grad = True
-        for p in model.get_model().image_mm_projector.parameters():
             p.requires_grad = True
         model.get_model().tor_embedding.requires_grad = True
     trainable_params = []

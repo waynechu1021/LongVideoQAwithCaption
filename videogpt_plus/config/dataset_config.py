@@ -4,8 +4,22 @@ import os
 DATASET_DIR = os.environ.get("DATASET_DIR", "/hdd2/zwy/VideoGPT-plus_Training_Dataset")
 
 MOMENTOR = {
-    "annotation_path": f"/ssd1/zhuweiye/VideoMeteor/playground/Moment-10M_0_for_stage1_selected.json",
-    "data_path": f"/ssd1/zhuweiye/VideoMeteor/playground/data",
+    "annotation_path": f"/ssd1/zwy/VideoMeteor/playground/Moment-10M_for_stage1_43k.json",
+    "data_path": f"/ssd1/zwy/VideoMeteor/playground/Momentor_video",
+}
+
+MOMENTOR_CAP_QA = {
+    "annotation_path": f"/ssd1/zwy/VideoMeteor/playground/Moment-10M_for_stage1_43k_for_baseline_ablation.json",
+    "data_path": f"/ssd1/zwy/VideoMeteor/playground/Momentor_video",
+}
+
+MOMENTOR_QA = {
+    "annotation_path": f"/ssd1/zwy/VideoMeteor/playground/Moment-10M_0_QA.json",
+    "data_path": f"/ssd1/zwy/VideoMeteor/playground/Momentor_video",
+}
+MOMENTOR_cross_segment_QA = {
+    "annotation_path": f"/ssd1/zwy/VideoMeteor/playground/Moment-10M_cross_segment_QA.json",
+    "data_path": f"/ssd1/zwy/VideoMeteor/playground/Momentor_video",
 }
 
 CC3M_595K = {
