@@ -895,7 +895,7 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                     )
                     new_attention_mask.append(cur_new_attention_mask)
                 attention_mask = torch.stack(new_attention_mask, dim=0)
-                assert attention_mask.shape == new_labels.shape
+                assert attention_mask.shape == new_input_embeds.shape
             if attention_mask_llm is not None:
                 new_attention_mask_llm = []
                 for cur_attention_mask_llm, cur_new_labels, cur_new_labels_align in zip(
@@ -914,7 +914,7 @@ class VideoGPTPlusMetaForCausalLM(ABC):
                     )
                     new_attention_mask_llm.append(cur_new_attention_mask_llm)
                 attention_mask_llm = torch.stack(new_attention_mask_llm, dim=0)
-                assert attention_mask_llm.shape == new_labels.shape
+                assert attention_mask_llm.shape == new_input_embeds_llm.shape
         else:
             new_input_embeds = torch.stack(new_input_embeds, dim=0)
             new_input_embeds_llm = torch.stack(new_input_embeds_llm, dim=0)
