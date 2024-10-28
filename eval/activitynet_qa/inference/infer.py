@@ -9,6 +9,8 @@ from torch.utils.data import DataLoader, DistributedSampler
 import traceback
 import transformers
 from transformers import StoppingCriteria, StoppingCriteriaList
+from videogpt_plus.mm_utils import KeywordsStoppingCriteria
+from videogpt_plus.conversation import conv_templates, SeparatorStyle
 
 
 def disable_torch_init():
@@ -48,6 +50,8 @@ def eval_model(args):
         mamba_tokenizer = transformers.AutoTokenizer.from_pretrained(
                 model.config.mm_mamba,
                 padding_side="right")
+    if getattr(model.config,'visual_token_compression_rate',None) is None:
+        model.config.visual_token_compression_rate = 2
     model.config.stage = 2
     mm_use_im_start_end = getattr(model.config, "mm_use_im_start_end", False)
     mm_use_im_patch_token = getattr(model.config, "mm_use_im_patch_token", True)
@@ -85,10 +89,12 @@ def eval_model(args):
 
         try:
             cur_prompt = qs
+            start_prompt = 'Below is a movie. Memorize the content and answer my question after watching this movie.'
+            end_prompt = 'Now the movie end.'
             if model.config.mm_use_im_start_end:
                 qs = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN * slice_len + DEFAULT_IM_END_TOKEN + '\n' + qs
             else:
-                qs = DEFAULT_IMAGE_TOKEN * slice_len + '\n' + qs
+                qs = start_prompt+DEFAULT_IMAGE_TOKEN * slice_len + '\n'+end_prompt + qs
 
             conv = conv_templates[args.conv_mode].copy()
             conv.append_message(conv.roles[0], qs)
@@ -121,7 +127,7 @@ def eval_model(args):
                     temperature=args.temperature,
                     top_p=args.top_p,
                     num_beams=args.num_beams,
-                    stopping_criteria = stopping_criteria,
+                    #stopping_criteria = stopping_criteria,
                     max_new_tokens=1024,
                     min_length = 1,
                     length_penalty=1,
@@ -150,7 +156,7 @@ def eval_model(args):
             print(f"Error processing video file '{sample['video_name'][0]}': {e}")
             print("Detailed traceback:")
             print(trace)
-    with open(f"{args.output_dir}/activitynetqa_pred.json", "w") as f:
+    with open(f"{args.output_dir}", "w") as f:
         json.dump(answer_data, f)
 
 
@@ -175,6 +181,6 @@ if __name__ == "__main__":
 
     init_distributed_mode(args)
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    # os.makedirs(args.output_dir, exist_ok=True)
 
     eval_model(args)

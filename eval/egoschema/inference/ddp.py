@@ -6,50 +6,50 @@ from videogpt_plus.constants import *
 from eval.video_encoding import _get_rawvideo_dec, read_frame_mod, read_gif_mod
 
 
-class EvalDatasetActivityNetQA(Dataset):
+class EvalDatasetEgoschema(Dataset):
     def __init__(self, questions, video_dir, image_processor, video_processor):
         with open(questions,'r') as f:
             self.questions = json.load(f)
         self.video_dir = video_dir
         self.image_processor = image_processor
         self.video_processor = video_processor
-        self.suffix = ['.mp4','.webm', '.mkv',]
 
     def __len__(self):
-        return 4000
         return len(self.questions)
 
     def __getitem__(self, idx):
         sample = self.questions[idx]
-        video_name = 'v_' + sample['video_name']
+        video_name = sample['q_uid']
         
-        for suffix in self.suffix:
-            video_path = os.path.join(self.video_dir, video_name+suffix)
-            if os.path.exists(video_path):
-                video_frames, context_frames, slice_len = (
+        video_path = os.path.join(self.video_dir, video_name+'.mp4')
+        if os.path.exists(video_path):
+            video_frames, context_frames, slice_len = (
                             _get_rawvideo_dec(video_path, self.image_processor, self.video_processor,
                                             max_frames=NUM_FRAMES, image_resolution=224,
                                             num_video_frames=NUM_FRAMES, num_context_images=NUM_CONTEXT_IMAGES))
-                break
-        if video_frames is None:
+        else:
             video_frames, slice_len = "None", 0
             print('Video not found:', video_path)
 
         sample_set = {}
-        question = qa_template(sample['question'])
+        question = qa_template(sample)
         sample_set['video_name'] = f'{video_name}'
         sample_set['Q'] = question
-        sample_set['question_id'] = sample['question_id']
 
         return idx, [sample_set], video_frames, context_frames, slice_len
 
 
 def qa_template(data):
-    question = f"Question: {data}\n"
+    question = f"Question: {data['question']}\n"
+    question += "Options:\n"
+    for idx in range(5):
+        c = data[f'option {idx}']
+        question += f"({chr(ord('A') + idx)}) {c}\n"
+    question = question.rstrip()
 
     # Add the instruction to question
-    # question_prompt = "Please answer the question as short as you can."  # to change
-    # question += question_prompt
+    question_prompt = "\nOnly give the best option."  # to change
+    question += question_prompt
 
     return question
 

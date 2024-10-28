@@ -4,10 +4,11 @@ import shortuuid
 from videogpt_plus.conversation import conv_templates
 from videogpt_plus.model.builder import load_pretrained_model
 from videogpt_plus.mm_utils import tokenizer_image_token, get_model_name_from_path
-from eval.mvbench.inference.ddp import *
+from eval.egoschema.inference.ddp import *
 from torch.utils.data import DataLoader, DistributedSampler
 import traceback
 import transformers
+from transformers import StoppingCriteria, StoppingCriteriaList
 
 
 def disable_torch_init():
@@ -16,31 +17,6 @@ def disable_torch_init():
     """
     import torch
     setattr(torch.nn.Linear, "reset_parameters", lambda self: None)
-
-
-mvbench_data_list = {
-    "Episodic Reasoning": ("episodic_reasoning.json", "your_data_path/tvqa/frames_fps3_hq/", "frame", True),
-    "Action Sequence": ("action_sequence.json", "your_data_path/star/Charades_v1_480/", "video", True),
-    "Action Prediction": ("action_prediction.json", "your_data_path/star/Charades_v1_480/", "video", True),
-    "Action Antonym": ("action_antonym.json", "your_data_path/ssv2_video/", "video", False),
-    "Fine-grained Action": ("fine_grained_action.json", "your_data_path/Moments_in_Time_Raw/videos/", "video", False),
-    "Unexpected Action": ("unexpected_action.json", "your_data_path/FunQA_test/test/", "video", False),
-    "Object Existence": ("object_existence.json", "your_data_path/clevrer/video_validation/", "video", False),
-    "Object Interaction": ("object_interaction.json", "your_data_path/star/Charades_v1_480/", "video", True),
-    "Object Shuffle": ("object_shuffle.json", "your_data_path/perception/videos/", "video", False),
-    "Moving Direction": ("moving_direction.json", "your_data_path/clevrer/video_validation/", "video", False),
-    "Action Localization": ("action_localization.json", "your_data_path/sta/sta_video/", "video", True),
-    "Scene Transition": ("scene_transition.json", "your_data_path/scene_qa/video/", "video", False),
-    "Action Count": ("action_count.json", "your_data_path/perception/videos/", "video", False),
-    "Moving Count": ("moving_count.json", "your_data_path/clevrer/video_validation/", "video", False),
-    "Moving Attribute": ("moving_attribute.json", "your_data_path/clevrer/video_validation/", "video", False),
-    "State Change": ("state_change.json", "your_data_path/perception/videos/", "video", False),
-    "Fine-grained Pose": ("fine_grained_pose.json", "your_data_path/nturgbd/", "video", False),
-    "Character Order": ("character_order.json", "your_data_path/perception/videos/", "video", False),
-    "Egocentric Navigation": ("egocentric_navigation.json", "your_data_path/vlnqa/", "video", False),
-    "Counterfactual Inference": (
-        "counterfactual_inference.json", "your_data_path/clevrer/video_validation/", "video", False),
-}
 
 
 def eval_model(args):
@@ -81,22 +57,18 @@ def eval_model(args):
 
     model = model.to("cuda")
 
-    dataset = EvalDatasetMvBench(args.question_dir, args.video_folder, image_processor,
-                                 video_processor, mvbench_data_list)
+    dataset = EvalDatasetEgoschema(args.question_dir, args.video_folder, image_processor,
+                                 video_processor)
     # distributed_sampler = DistributedSampler(dataset, rank=args.rank, shuffle=False)
     # dataloader = DataLoader(dataset, batch_size=args.batch_size_per_gpu, num_workers=4, sampler=distributed_sampler)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size_per_gpu, num_workers=4, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size_per_gpu, num_workers=4, shuffle=False)
 
+    answer_data = []
     for (idx, sample_set, video_frames, context_frames, slice_len) in tqdm(dataloader):
         idx, sample_set, video_frames, context_frames, slice_len = int(idx[0]), sample_set[
             0], video_frames, context_frames, int(slice_len[0])
         #FIXME  there is a bug for some sample that can not sample 16 frames and is padded to 16 frames 
         slice_len = len(video_frames)
-        video_json_name = sample_set['video_name'][0].replace('/', '_')
-        if len(video_json_name) > 100:
-            video_json_name = video_json_name[50:]
-        if os.path.exists(f"{args.output_dir}/{video_json_name}_{idx}.json"):
-            continue
         sample = sample_set
         qs = sample['Q'][0]
 
@@ -153,25 +125,17 @@ def eval_model(args):
             outputs = outputs.replace("<|end|>", '')
             outputs = outputs.strip()
 
-            ans_id = shortuuid.uuid()
-            video_json_name = sample['video_name'][0].replace('/', '_')
-            if len(video_json_name) > 100:
-                video_json_name = video_json_name[50:]
+            results = {"question uid": sample['video_name'][0],
+                       "answer": outputs,}
+            answer_data.append(results)
 
-            results = {'video_name': sample['video_name'][0],
-                       "prompt": cur_prompt,
-                       "pred": outputs,
-                       "answer_id": ans_id,
-                       "Q": sample_set['Q'][0],
-                       "task_type": sample['task_type'][0],
-                       "A": sample['A'][0]}
-            with open(f"{args.output_dir}/{video_json_name}_{idx}.json", "w") as f:
-                json.dump(results, f)
         except Exception as e:
             trace = traceback.format_exc()
             print(f"Error processing video file '{sample['video_name'][0]}': {e}")
             print("Detailed traceback:")
             print(trace)
+    with open(f"{args.output_dir}", "w") as f:
+        json.dump(answer_data, f)
 
 
 if __name__ == "__main__":
@@ -182,7 +146,7 @@ if __name__ == "__main__":
     parser.add_argument("--question-dir", type=str, default="OpenGVLab/MVBench/json")
     parser.add_argument("--output-dir", type=str, default="MBZUAI/VideoGPT-plus_Phi3-mini-4k/mvbench_eval")
     parser.add_argument("--conv-mode", type=str, default="phi3_instruct")
-    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=None)
     parser.add_argument("--num_beams", type=int, default=1)
 
@@ -195,6 +159,6 @@ if __name__ == "__main__":
 
     init_distributed_mode(args)
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    # os.makedirs(args.output_dir, exist_ok=True)
 
     eval_model(args)
