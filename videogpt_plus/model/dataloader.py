@@ -39,17 +39,18 @@ def _get_rawvideo_dec(video_path, image_processor, video_processor, max_frames=8
     if num_frames > 0:
         # T x 3 x H x W
         sample_fps = int(video_framerate)
-        t_stride = int(round(float(fps) / sample_fps))
+        # t_stride = int(round(float(fps) / sample_fps))
+        t_stride = 1
 
         all_pos = list(range(f_start, f_end + 1, t_stride))
         if len(all_pos) > max_frames:
             sample_pos = [all_pos[_] for _ in np.linspace(0, len(all_pos) - 1, num=max_frames, dtype=int)]
-        elif len(all_pos) < min_frames:
-            if num_frames < min_frames:
-                min_frames = num_frames
-            t_stride = max(1, (f_end - f_start) // (min_frames - 1))
-            adjusted_f_end = f_start + t_stride * (min_frames - 1)
-            sample_pos = list(range(f_start, adjusted_f_end + 1, t_stride))
+        # elif len(all_pos) < min_frames:
+        #     if num_frames < min_frames:
+        #         min_frames = num_frames
+        #     t_stride = max(1, (f_end - f_start) // (min_frames - 1))
+        #     adjusted_f_end = f_start + t_stride * (min_frames - 1)
+        #     sample_pos = list(range(f_start, adjusted_f_end + 1, t_stride))
         else:
             sample_pos = all_pos
 

@@ -62,6 +62,7 @@ class ModelArguments:
     mm_projector_type: Optional[str] = field(default='mlp2x_gelu')
     image_mm_projector_type: Optional[str] = field(default='mlp2x_gelu')
     mm_use_box_start_end: bool = field(default=False)
+    visual_token_compression_rate: Optional[int] = field(default=2)
 
 
 @dataclass
@@ -966,7 +967,7 @@ def train():
     if model_args.image_vision_tower is not None:
         for p in model.get_image_vision_tower().parameters():
             p.requires_grad = False
-
+    model.config.visual_token_compression_rate = model_args.visual_token_compression_rate
     trainable_params = []
     for k,v in model.named_parameters():
         if v.requires_grad:

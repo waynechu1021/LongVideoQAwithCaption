@@ -14,7 +14,7 @@ MOMENTOR_CAP_QA = {
 }
 
 MOMENTOR_QA = {
-    "annotation_path": f"/ssd1/zwy/VideoMeteor/playground/Moment-10M_0_QA.json",
+    "annotation_path": f"/ssd1/zwy/VideoMeteor/playground/Moment-10M_1_QA.json",
     "data_path": f"/ssd1/zwy/VideoMeteor/playground/Momentor_video",
 }
 MOMENTOR_cross_segment_QA = {
