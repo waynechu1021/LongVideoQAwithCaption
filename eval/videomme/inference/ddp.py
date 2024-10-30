@@ -46,7 +46,7 @@ def qa_template(data):
     question += "Options:\n"
 
     for idx, c in enumerate(data['options']):
-        question += f"({chr(ord('A') + idx)}) {c}\n"
+        question += f"({chr(ord('A') + idx)}) {c[3:]}\n"
     question = question.rstrip()
 
     # Add the instruction to question
