@@ -38,7 +38,7 @@ def print_result(eval_results):
     print(f"Match Success Rate={match_rate}")
 
 
-def main(predictions, eval_results, output_file, disable_llm):
+def main(predictions, eval_results, output_file):
     for id in tqdm(predictions):
 
         if id not in eval_results:
@@ -73,11 +73,9 @@ def main(predictions, eval_results, output_file, disable_llm):
                     eval_result["rating"] = 1 if pred["prediction"].split('.')[0]==pred["answer"][0] else 0
                 elif any(pred["prediction"].startswith(prefix) for prefix in ['A)', 'B)', 'C)', 'D)']):
                     eval_result["rating"] = 1 if pred["prediction"].split(')')[0]==pred["answer"][0] else 0
-                elif disable_llm:
+                else:
                     eval_result["match_success"] = False    
                     eval_result["rating"] = 0               # Fail to match answer in the video-llm response. Directly set rating to 0
-                else:
-                    raise NotImplementedError
 
                 eval_results[id][dim].append(eval_result)
 
@@ -91,10 +89,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--pred_file', default="video-llava")
     parser.add_argument('--output_file', default="video-llava")
-    parser.add_argument('--disable_llm', action='store_true', help="Whether to disable llm evaluation")
     args = parser.parse_args()
 
-    disable_suffix = "_disable_llm" if args.disable_llm else ""
     input_file = f"{args.pred_file}"
     output_file = f"{args.output_file}"
     if not os.path.exists(os.path.dirname(output_file)):
@@ -112,4 +108,4 @@ if __name__ == "__main__":
     #     eval_results = {}
     eval_results = {}
 
-    main(predictions, eval_results, output_file, args.disable_llm)
+    main(predictions, eval_results, output_file)
