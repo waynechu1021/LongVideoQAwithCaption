@@ -6,21 +6,22 @@ from videogpt_plus.constants import *
 from eval.video_encoding import _get_rawvideo_dec, read_frame_mod, read_gif_mod
 
 
-class EvalDatasetVideoMME(Dataset):
+class EvalDatasetTempCompass(Dataset):
     def __init__(self, questions, video_dir, image_processor, video_processor):
         with open(questions,'r') as f:
             self.questions = json.load(f)
         self.video_dir = video_dir
         self.image_processor = image_processor
         self.video_processor = video_processor
+        self.index_list = list(self.questions)
 
     def __len__(self):
         return len(self.questions)
 
     def __getitem__(self, idx):
-        sample = self.questions[idx]
-        video_name = sample['videoID']
-        
+        video_name = self.index_list[idx]
+        sample = self.questions[video_name]
+
         video_path = os.path.join(self.video_dir, video_name+'.mp4')
         if os.path.exists(video_path):
             video_frames, context_frames, slice_len = (
@@ -30,31 +31,23 @@ class EvalDatasetVideoMME(Dataset):
         else:
             video_frames, slice_len = "None", 0
             print('Video not found:', video_path)
-
         sample_set = {}
         sample_set['video_name'] = f'{video_name}'
-        sample_set['Q'] = []
-        for item in sample['questions']:
-            question = qa_template(item)
-            sample_set['Q'].append(question)
-
-        return idx, [sample_set], video_frames, context_frames, slice_len, sample
+        sample = qa_template(sample)
+        sample_set['data'] = sample
+        
+        return idx, [sample_set], video_frames, context_frames, slice_len
 
 
 def qa_template(data):
-    question = f"Question: {data['question']}\n"
-    question += "Options:\n"
-
-    for idx, c in enumerate(data['options']):
-        assert c[0] == chr(ord('A') + idx) and c[1] == '.' and c[2] == ' '
-        question += f"({chr(ord('A') + idx)}) {c[3:]}\n"
-    question = question.rstrip()
-
-    # Add the instruction to question
-    question_prompt = "\nOnly give the best option."  # to change
-    question += question_prompt
-
-    return question
+    for dim, questions in data.items():
+        for question in questions:
+            tmp = question['question'].split('\n')
+            question['question'] = tmp[0] + '\n' + "Options:\n"
+            for item in tmp[1:]:
+                 question['question'] += item + '\n'
+            question['question'] += "Only give the best option."
+    return data
 
 
 def setup_for_distributed(is_master):
