@@ -22,8 +22,8 @@ class MetaModel:
         if hasattr(config,'mm_mamba'):
             print('building mm_mamba')
             self.mamba = MeteorMambaForCausalLM.from_pretrained(config.mm_mamba)
-            del self.mamba.lm_head
             # self.mamba.resize_token_embeddings(32064)
+            del self.mamba.lm_head
             self.vision_projector = build_vision_projector_mamba(self.get_vision_tower().hidden_size, self.mamba.config.hidden_size)
             self.image_vision_projector = build_image_vision_projector_mamba(self.get_image_vision_tower().hidden_size, self.mamba.config.hidden_size)
             self.tor_projector = torch.nn.Sequential(
@@ -145,7 +145,10 @@ class MetaModel:
                 else:
                     return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k and ignore_keyword not in k}
             logging.info(f"Initializing vision_projector from {pretrained_vision_proj_mamba}")
-            msg = self.vision_projector.load_state_dict(get_w(vision_proj_mamba_weights, 'vision_projector','image_vision_projector'))
+            if self.config.stage == 1:
+                msg = self.vision_projector.load_state_dict(get_w(vision_proj_mamba_weights, 'mm_projector',))
+            else:
+                msg = self.vision_projector.load_state_dict(get_w(vision_proj_mamba_weights, 'vision_projector','image_vision_projector'))
             logging.info(f'load vision_projector {msg}')
         if pretrained_image_vision_proj_mamba is not None:
             image_vision_proj_weights = torch.load(pretrained_image_vision_proj_mamba, map_location='cpu')
@@ -155,7 +158,10 @@ class MetaModel:
                 else:
                     return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k and ignore_keyword not in k}
             logging.info(f"Initializing image_vision_projector from {pretrained_image_vision_proj_mamba}")
-            msg = self.image_vision_projector.load_state_dict(get_w(image_vision_proj_weights, 'image_vision_projector'))
+            if self.config.stage == 1:
+                msg = self.image_vision_projector.load_state_dict(get_w(image_vision_proj_weights, 'mm_projector'))
+            else:
+                msg = self.image_vision_projector.load_state_dict(get_w(image_vision_proj_weights, 'image_vision_projector'))
             logging.info(f'load image_vision_projector {msg}')
     
             
@@ -165,8 +171,8 @@ class MetaModel:
             pretrain_mamba_module = model_args.pretrain_mamba_module
             self.config.mm_mamba = model_args.mamba_name_or_path 
             self.mamba = MeteorMambaForCausalLM.from_pretrained(model_args.mamba_name_or_path)
-            del self.mamba.lm_head
             # self.mamba.resize_token_embeddings(32064)
+            del self.mamba.lm_head
             if pretrain_mamba_module is not None:
                 logging.info(f"Initializing mamba module from {pretrain_mamba_module}")
                 ckpt = torch.load(pretrain_mamba_module, map_location='cpu')
