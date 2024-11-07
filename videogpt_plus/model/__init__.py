@@ -1,2 +1,3 @@
 from .language_model.phi3 import VideoGPTPlusPhi3ForCausalLM, VideoGPTPlusConfig
 from .language_model.mamba_pretrain import VideoGPTPlusMambaForCausalLM, VideoGPTPlusMambaConfig
+from .language_model.qwen2p5 import VideoGPTPlusQwen2ForCausalLM,VideoGPTPlusQwen2Config

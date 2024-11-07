@@ -1,7 +1,7 @@
 import os
 
 # DATASET_DIR = os.environ.get("DATASET_DIR", "playground/data")
-DATASET_DIR = os.environ.get("DATASET_DIR", "/hdd2/zwy/VideoGPT-plus_Training_Dataset")
+DATASET_DIR = os.environ.get("DATASET_DIR", "/ssd1/zwy/VideoMeteor/playground/VideoGPT-plus_Training_Dataset")
 
 MOMENTOR = {
     "annotation_path": f"/ssd1/zwy/VideoMeteor/playground/Moment-10M_for_stage1_43k.json",
@@ -65,16 +65,19 @@ CAPTION_VIDEOCHAT = {
 CLASSIFICATION_K710 = {
     "annotation_path": f"{DATASET_DIR}/annotations/classification_k710.json",
     "data_path": f"{DATASET_DIR}/instruction_tuning/k710",
+    "feature_path":f"{DATASET_DIR}/instruction_tuning/k710_feature",
 }
 
 CLASSIFICATION_SSV2 = {
     "annotation_path": f"{DATASET_DIR}/annotations/classification_ssv2.json",
     "data_path": f"{DATASET_DIR}/instruction_tuning/ssv2",
+    "feature_path":f"{DATASET_DIR}/instruction_tuning/ssv2_feature",
 }
 
 CONV_VideoChat1 = {
     "annotation_path": f"{DATASET_DIR}/annotations/conversation_videochat1.json",
     "data_path": f"{DATASET_DIR}/instruction_tuning/videochat_it",
+    "feature_path":f"{DATASET_DIR}/instruction_tuning/videochat_it_feature",
 }
 
 REASONING_NExTQA = {
@@ -85,11 +88,13 @@ REASONING_NExTQA = {
 REASONING_CLEVRER_QA = {
     "annotation_path": f"{DATASET_DIR}/annotations/reasoning_clevrer_qa.json",
     "data_path": f"{DATASET_DIR}/instruction_tuning/clevrer",
+    "feature_path":f"{DATASET_DIR}/instruction_tuning/clevrer_feature",
 }
 
 REASONING_CLEVRER_MC = {
     "annotation_path": f"{DATASET_DIR}/annotations/reasoning_clevrer_mc.json",
     "data_path": f"{DATASET_DIR}/instruction_tuning/clevrer",
+    "feature_path": f"{DATASET_DIR}/instruction_tuning/clevrer_feature",
 }
 
 VQA_WEBVID_QA = {

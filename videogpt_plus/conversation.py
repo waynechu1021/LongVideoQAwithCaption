@@ -9,6 +9,7 @@ class SeparatorStyle(Enum):
     TWO = auto()
     MPT = auto()
     PLAIN = auto()
+    QWEN2 = auto()
 
 
 @dataclasses.dataclass
@@ -76,6 +77,15 @@ class Conversation:
                     ret += message + seps[i % 2]
                 else:
                     ret += ""
+        elif self.sep_style == SeparatorStyle.QWEN2:
+            ret = self.system + self.sep
+            for i, (role, message) in enumerate(messages):
+                if message:
+                    if type(message) is tuple:
+                        message, _, _ = message
+                    ret += role + message + self.sep
+                else:
+                    ret += role
         else:
             raise ValueError(f"Invalid style: {self.sep_style}")
 
@@ -154,13 +164,26 @@ conv_mamba = Conversation(
     sep2="<|endoftext|>",
 )
 
+conv_qwen_2 = Conversation(
+    system="""<|im_start|>system
+A conversation between a user and an LLM-based AI assistant. The assistant gives helpful and honest answers.""",
+    roles=("<|im_start|>user\n", "<|im_start|>assistant\n"),
+    version="qwen_2",
+    messages=(),
+    offset=0,
+    sep_style=SeparatorStyle.QWEN2,
+    sep="<|im_end|>",
+    # sep2="<|endoftext|>"
+)
+
 default_conversation = conv_phi3_instruct
 conv_templates = {
     "default": conv_phi3_instruct,
     "plain": conv_plain,
     "v1": conv_v1,
     "phi3_instruct": conv_phi3_instruct,
-    "mamba":conv_mamba
+    "mamba":conv_mamba,
+    "qwen2":conv_qwen_2
 }
 
 if __name__ == "__main__":

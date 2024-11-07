@@ -1024,8 +1024,10 @@ class VideoGPTPlusMetaForCausalLM(ABC):
         new_hidden_states = []
         for idx,cur_hidden_state in enumerate(hidden_states):
             cur_label = labels[idx]
-            # tor_token_index_llm = torch.where(input_ids_llm[idx]==self.config.tor_token_index)
             new_hidden_state = cur_hidden_state[input_ids_llm[idx]!=self.config.tor_token_index]
+            # shift_index = torch.where(input_ids_llm[idx]!=self.config.tor_token_index)
+            # shift_index = (shift_index[0] - 1,)
+            # new_hidden_state = cur_hidden_state[shift_index]
             if cur_label.shape[0] >= new_hidden_state.shape[0]:
                 new_hidden_state = torch.cat([new_hidden_state,torch.zeros((cur_label.shape[0]-new_hidden_state.shape[0],new_hidden_state.shape[1]),dtype=new_hidden_state.dtype,device=new_hidden_state.device)])
             else:

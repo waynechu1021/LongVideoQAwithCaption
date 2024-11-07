@@ -4,8 +4,8 @@ from distutils.util import strtobool
 # Configuration Constants
 # TODO: Change the chunk size if you use any other video encoder accordingly
 CHUNK_SIZE = 4  # Video chunk size for InternVideo2-Stage2_1B-224p-f4 which is trained using 4 frames per video
-NUM_FRAMES = int(os.environ.get("NUM_FRAMES", 64))  # Number of video frames (if using video)
-NUM_CONTEXT_IMAGES = int(os.environ.get("NUM_CONTEXT_IMAGES", 64))  # Number of context images for video
+NUM_FRAMES = int(os.environ.get("NUM_FRAMES", 16))  # Number of video frames (if using video)
+NUM_CONTEXT_IMAGES = int(os.environ.get("NUM_CONTEXT_IMAGES", 16))  # Number of context images for video
 
 # Model Constants
 IGNORE_INDEX = -100
@@ -23,5 +23,5 @@ DEFAULT_BOX_END_TOKEN = "<box_end>"
 
 #change TOR_TOKEN_INDEX to the index of tor in tokenizer
 DEFAULT_TOR_TOKRN = "<tor>"
-TOR_TOKEN_INDEX = 32011
+TOR_TOKEN_INDEX = 151665 #32011 for phi3 and 151665 for qwen2-1.5b-instruct  
 TOR_TOKEN_INDEX_MAMBA = 50277
