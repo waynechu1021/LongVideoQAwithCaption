@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 import traceback
 import transformers
 from transformers import StoppingCriteria, StoppingCriteriaList
+from videogpt_plus.conversation import SeparatorStyle
 
 
 def disable_torch_init():
@@ -97,8 +98,8 @@ def eval_model(args):
                 input_ids_mamba = tokenizer_image_token(prompt, mamba_tokenizer, IMAGE_TOKEN_INDEX,
                                                 return_tensors='pt').unsqueeze(0).cuda()
 
-            # stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
-            stop_str = "<|end|>"
+            stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
+            # stop_str = "<|end|>"
 
             with torch.inference_mode():
                 output_ids = model.generate(
@@ -122,7 +123,7 @@ def eval_model(args):
             if outputs.endswith(stop_str):
                 outputs = outputs[:-len(stop_str)]
             outputs = outputs.strip()
-            outputs = outputs.replace("<|end|>", '')
+            outputs = outputs.replace(stop_str, '')
             outputs = outputs.strip()
 
             results = {"question uid": sample['video_name'][0],
