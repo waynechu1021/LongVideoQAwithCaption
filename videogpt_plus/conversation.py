@@ -165,8 +165,7 @@ conv_mamba = Conversation(
 )
 
 conv_qwen_2 = Conversation(
-    system="""<|im_start|>system
-A conversation between a user and an LLM-based AI assistant. The assistant gives helpful and honest answers.""",
+    system="""<|im_start|>system\nA conversation between a user and an LLM-based AI assistant. The assistant gives helpful and honest answers.""",
     roles=("<|im_start|>user\n", "<|im_start|>assistant\n"),
     version="qwen_2",
     messages=(),

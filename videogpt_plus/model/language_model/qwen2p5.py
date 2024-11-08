@@ -122,7 +122,7 @@ class VideoGPTPlusQwen2ForCausalLM(Qwen2ForCausalLM, VideoGPTPlusMetaForCausalLM
                     )
                     last_hidden_states = mamba_outputs.last_hidden_state.to(inputs_embeds_llm.dtype)
                     # the number of event is not always the same in a batch
-                    inputs_embeds_llm = self.merge_input_embeds_with_tor_features(last_hidden_states,input_ids_mamba,input_ids,inputs_embeds_llm, stage=self.config.stage,labels=labels)
+                    inputs_embeds_llm = self.merge_input_embeds_with_tor_features(last_hidden_states,input_ids_mamba,input_ids,inputs_embeds_llm, stage=self.config.stage)
                     # new_inputs_embed_llm = []
                     # for i in range(inputs_embeds.shape[0]):
                     #     image_token_index = torch.where(input_ids[i]==self.config.image_token_index)
