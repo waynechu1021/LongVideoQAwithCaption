@@ -103,10 +103,7 @@ class VideoGPTPlusQwen2ForCausalLM(Qwen2ForCausalLM, VideoGPTPlusMetaForCausalLM
                     #     image_token_index = torch.where(input_ids[i]==self.config.image_token_index)
                     #     input_ids_llm_image = input_ids[i][image_token_index]
                     #     visual_token_length = NUM_FRAMES*int(16/self.config.visual_token_compression_rate)**2 + NUM_CONTEXT_IMAGES*int(24/self.config.visual_token_compression_rate)**2
-                    #     # inputs_embeds_llm_image = inputs_embeds_llm[i][image_token_index[0][-1]-NUM_FRAMES+visual_token_length+1:image_token_index[0][-1]-NUM_FRAMES+visual_token_length+1+self.get_model().max_num_of_tor]
-                    #     # preds_index = torch.where(labels[i] != IGNORE_INDEX)[0]
-                    #     # inputs_embeds_llm_image = inputs_embeds_llm[i][preds_index[0]-self.get_model().max_num_of_tor:preds_index[0]]
-                    #     inputs_embeds_llm_image = inputs_embeds_llm[i][-self.get_model().max_num_of_tor-1:-1]
+                    #     inputs_embeds_llm_image = inputs_embeds_llm[i][image_token_index[0][-1]-NUM_FRAMES+visual_token_length+1:image_token_index[0][-1]-NUM_FRAMES+visual_token_length+1+self.get_model().max_num_of_tor]
                     #     tor_embed = self.get_model().tor_projector(self.get_model().tor_embedding[:self.get_model().max_num_of_tor])
                     #     iftrue = torch.all(inputs_embeds_llm_image == tor_embed)
                     #     print(iftrue)
@@ -167,12 +164,8 @@ class VideoGPTPlusQwen2ForCausalLM(Qwen2ForCausalLM, VideoGPTPlusMetaForCausalLM
         loss = None
         if labels is not None:
             # Shift so that tokens < n predict n
-            if getattr(self.config,'stage',None) == 1:
-                shift_logits = logits
-                shift_labels = labels
-            else:
-                shift_logits = logits[..., :-1, :].contiguous()
-                shift_labels = labels[..., 1:].contiguous()
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
             # Flatten the tokens
             loss_fct = CrossEntropyLoss()
             shift_logits = shift_logits.view(-1, self.config.vocab_size)
