@@ -2,6 +2,7 @@ playground/
 .cache/
 .vscode/
 results/
+results_qwen2/
 scripts/
 videogpt_plus/config/dataset_config.py
 test.ipynb
